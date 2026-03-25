@@ -1,4 +1,4 @@
-# WindScope — Wind Resource Analysis Platform
+# WindWhisper — Wind Resource Analysis Platform
 ## Master Project Specification & Incremental Task List
 
 **Repository**: `coderenewables/wind-resource`  
@@ -13,7 +13,7 @@
 1. [Project Overview](#1-project-overview)
 2. [Technical Architecture](#2-technical-architecture)
 3. [Technology Stack](#3-technology-stack)
-4. [Feature Mapping](#4-feature-mapping-windographer-to-windscope)
+4. [Feature Mapping](#4-feature-mapping-windographer-to-WindWhisper)
 5. [Development Phases](#5-development-phases)
 6. [Incremental Daily Tasks](#6-incremental-daily-tasks)
 
@@ -22,7 +22,7 @@
 ## 1. Project Overview
 
 ### 1.1 Goals
-Build an open-source, web-based wind data analysis platform ("WindScope") that covers the full wind resource assessment (WRA) workflow:
+Build an open-source, web-based wind data analysis platform ("WindWhisper") that covers the full wind resource assessment (WRA) workflow:
 
 - **Import** raw data from meteorological towers, LiDAR, SoDAR, CSV/Excel, and reanalysis datasets (ERA5, MERRA-2)
 - **Validate & QC** data with automated flagging rules and manual annotation
@@ -373,9 +373,9 @@ CREATE TABLE analysis_results (
 
 ---
 
-## 4. Feature Mapping: Windographer → WindScope
+## 4. Feature Mapping: Windographer → WindWhisper
 
-| # | Windographer Feature | WindScope Task(s) | Priority |
+| # | Windographer Feature | WindWhisper Task(s) | Priority |
 |---|---------------------|-------------------|----------|
 | F1 | Multi-format file import (CSV, Excel, NRG, Campbell, LiDAR) | Tasks 4–6 | High |
 | F2 | Auto-detect data structure (columns, heights, time step) | Task 5 | High |
@@ -740,7 +740,7 @@ Undo system, workflows, testing, deployment, documentation.
 3. Configure TailwindCSS with dark mode support
 4. Create `AppShell.tsx` — main layout with:
    - Left sidebar (collapsible, 240px) with navigation: Dashboard, Projects, Import, Time Series, QC, Analysis, MCP, Energy, Export
-   - Top bar with app name "WindScope" and breadcrumbs
+   - Top bar with app name "WindWhisper" and breadcrumbs
    - Main content area
 5. Create `api/client.ts` — Axios instance with `baseURL: /api` and interceptors for error handling
 6. Create `api/projects.ts` — functions: `listProjects()`, `getProject(id)`, `createProject(data)`, `updateProject(id, data)`, `deleteProject(id)`
@@ -2127,4 +2127,4 @@ Station: <name>
 
 ---
 
-*This specification was generated from comprehensive research on Windographer by UL Solutions. WindScope is an independent, open-source project and is not affiliated with Windographer or UL Solutions.*
+*This specification was generated from comprehensive research on Windographer by UL Solutions. WindWhisper is an independent, open-source project and is not affiliated with Windographer or UL Solutions.*
