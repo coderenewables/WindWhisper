@@ -24,21 +24,21 @@ class LoadedDatasetFrame:
 
 def icing_rules(temperature_column_id: uuid.UUID, speed_sd_column_id: uuid.UUID) -> list[FlagRuleCreate]:
     return [
-        FlagRuleCreate(column_id=temperature_column_id, operator="<", value=2, logic="AND"),
-        FlagRuleCreate(column_id=speed_sd_column_id, operator="==", value=0, logic="AND"),
+        FlagRuleCreate(column_id=temperature_column_id, operator="<", value=2, logic="AND", group_index=1, order_index=1),
+        FlagRuleCreate(column_id=speed_sd_column_id, operator="==", value=0, logic="AND", group_index=1, order_index=2),
     ]
 
 
 def range_check(column_id: uuid.UUID, minimum: float, maximum: float) -> list[FlagRuleCreate]:
     return [
-        FlagRuleCreate(column_id=column_id, operator="between", value=[minimum, maximum], logic="AND"),
+        FlagRuleCreate(column_id=column_id, operator="between", value=[minimum, maximum], logic="AND", group_index=1, order_index=1),
     ]
 
 
 def flat_line(column_id: uuid.UUID, duration: int) -> list[FlagRuleCreate]:
     return [
-        FlagRuleCreate(column_id=column_id, operator="==", value=0, logic="AND"),
-        FlagRuleCreate(column_id=column_id, operator=">=", value=duration, logic="AND"),
+        FlagRuleCreate(column_id=column_id, operator="==", value=0, logic="AND", group_index=1, order_index=1),
+        FlagRuleCreate(column_id=column_id, operator=">=", value=duration, logic="AND", group_index=1, order_index=2),
     ]
 
 
@@ -176,17 +176,46 @@ async def apply_rules(db: AsyncSession, dataset_id: uuid.UUID, flag_id: uuid.UUI
         await db.commit()
         return []
 
-    combined_mask = pd.Series(True, index=loaded.frame.index, dtype=bool)
+    grouped_rules: dict[int, list[FlagRule]] = {}
     involved_column_ids: list[uuid.UUID] = []
-    for rule in flag.rules:
-        rule_json = rule.rule_json
-        column_id = uuid.UUID(str(rule_json["column_id"]))
-        column = loaded.columns_by_id.get(column_id)
-        if column is None:
-          raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rule references a missing dataset column")
-        series = loaded.frame[column.name]
-        combined_mask &= _evaluate_rule(series, str(rule_json["operator"]), rule_json.get("value")).fillna(False)
-        involved_column_ids.append(column_id)
+    for rule in sorted(
+        flag.rules,
+        key=lambda item: (
+            int(item.rule_json.get("group_index", 1)),
+            int(item.rule_json.get("order_index", 1)),
+            str(item.id),
+        ),
+    ):
+        grouped_rules.setdefault(int(rule.rule_json.get("group_index", 1)), []).append(rule)
+
+    group_masks: list[pd.Series] = []
+    for group_rules in grouped_rules.values():
+        group_mask: pd.Series | None = None
+        for rule in group_rules:
+            rule_json = rule.rule_json
+            column_id = uuid.UUID(str(rule_json["column_id"]))
+            column = loaded.columns_by_id.get(column_id)
+            if column is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rule references a missing dataset column")
+            series = loaded.frame[column.name]
+            rule_mask = _evaluate_rule(series, str(rule_json["operator"]), rule_json.get("value")).fillna(False)
+            if group_mask is None:
+                group_mask = rule_mask
+            elif str(rule_json.get("logic", "AND")).upper() == "OR":
+                group_mask = group_mask | rule_mask
+            else:
+                group_mask = group_mask & rule_mask
+            involved_column_ids.append(column_id)
+
+        if group_mask is not None:
+            group_masks.append(group_mask)
+
+    if not group_masks:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Flag has no valid rules to apply")
+
+    combined_mask = group_masks[0]
+    for group_mask in group_masks[1:]:
+        combined_mask = combined_mask | group_mask
 
     tolerance = _expected_gap_tolerance(loaded.dataset, loaded.frame)
     merged_ranges = _merge_mask_to_ranges(combined_mask, tolerance)

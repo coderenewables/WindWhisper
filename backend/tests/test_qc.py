@@ -110,11 +110,11 @@ async def test_apply_rules_creates_merged_automatic_ranges(client: AsyncClient, 
 
     first_rule = await client.post(
         f"/api/qc/flags/{flag_id}/rules",
-        json={"column_id": str(temp_column.id), "operator": "<", "value": 2},
+        json={"column_id": str(temp_column.id), "operator": "<", "value": 2, "group_index": 1, "order_index": 1},
     )
     second_rule = await client.post(
         f"/api/qc/flags/{flag_id}/rules",
-        json={"column_id": str(speed_column.id), "operator": "<=", "value": 3},
+        json={"column_id": str(speed_column.id), "operator": "<=", "value": 3, "group_index": 1, "order_index": 2},
     )
 
     assert first_rule.status_code == 201
@@ -171,20 +171,23 @@ async def test_update_and_delete_rule(client: AsyncClient, db_session: AsyncSess
 
     create_rule_response = await client.post(
         f"/api/qc/flags/{flag_id}/rules",
-        json={"column_id": str(speed_column.id), "operator": "<", "value": 2},
+        json={"column_id": str(speed_column.id), "operator": "<", "value": 2, "group_index": 1, "order_index": 1},
     )
     assert create_rule_response.status_code == 201
     rule_id = create_rule_response.json()["id"]
 
     update_rule_response = await client.put(
         f"/api/qc/rules/{rule_id}",
-        json={"column_id": str(temp_column.id), "operator": "between", "value": [-5, 1]},
+        json={"column_id": str(temp_column.id), "operator": "between", "value": [-5, 1], "group_index": 2, "order_index": 3, "logic": "OR"},
     )
     assert update_rule_response.status_code == 200
     updated_payload = update_rule_response.json()
     assert updated_payload["column_id"] == str(temp_column.id)
     assert updated_payload["operator"] == "between"
     assert updated_payload["value"] == [-5, 1]
+    assert updated_payload["group_index"] == 2
+    assert updated_payload["order_index"] == 3
+    assert updated_payload["logic"] == "OR"
 
     list_rules_response = await client.get(f"/api/qc/flags/{flag_id}/rules")
     assert list_rules_response.status_code == 200
@@ -197,3 +200,42 @@ async def test_update_and_delete_rule(client: AsyncClient, db_session: AsyncSess
     rules_after_delete = await client.get(f"/api/qc/flags/{flag_id}/rules")
     assert rules_after_delete.status_code == 200
     assert rules_after_delete.json() == []
+
+
+async def test_apply_rules_supports_grouping_and_or_logic(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, speed_column, temp_column = await _seed_dataset(db_session)
+    flag_id = (
+        await client.post(f"/api/qc/flags/{dataset.id}", json={"name": "Grouped logic", "color": "#7c3aed"})
+    ).json()["id"]
+
+    responses = await client.post(
+        f"/api/qc/flags/{flag_id}/rules",
+        json={"column_id": str(temp_column.id), "operator": "<", "value": 0, "group_index": 1, "order_index": 1},
+    )
+    assert responses.status_code == 201
+    responses = await client.post(
+        f"/api/qc/flags/{flag_id}/rules",
+        json={"column_id": str(speed_column.id), "operator": "<=", "value": 2, "logic": "AND", "group_index": 1, "order_index": 2},
+    )
+    assert responses.status_code == 201
+    responses = await client.post(
+        f"/api/qc/flags/{flag_id}/rules",
+        json={"column_id": str(speed_column.id), "operator": ">=", "value": 7, "logic": "AND", "group_index": 2, "order_index": 1},
+    )
+    assert responses.status_code == 201
+    responses = await client.post(
+        f"/api/qc/flags/{flag_id}/rules",
+        json={"column_id": str(temp_column.id), "operator": ">=", "value": 4, "logic": "OR", "group_index": 2, "order_index": 2},
+    )
+    assert responses.status_code == 201
+
+    apply_response = await client.post(f"/api/qc/flags/{flag_id}/apply-rules")
+    assert apply_response.status_code == 200
+    flagged_ranges = apply_response.json()
+    assert len(flagged_ranges) == 3
+    assert flagged_ranges[0]["start_time"] == "2025-01-01T00:00:00Z"
+    assert flagged_ranges[0]["end_time"] == "2025-01-01T00:00:00Z"
+    assert flagged_ranges[1]["start_time"] == "2025-01-01T00:20:00Z"
+    assert flagged_ranges[1]["end_time"] == "2025-01-01T00:30:00Z"
+    assert flagged_ranges[2]["start_time"] == "2025-01-01T00:50:00Z"
+    assert flagged_ranges[2]["end_time"] == "2025-01-01T00:50:00Z"

@@ -43,6 +43,8 @@ const rules: FlagRule[] = [
     operator: "<",
     value: 3,
     logic: "AND",
+    group_index: 1,
+    order_index: 1,
   },
 ];
 
@@ -72,6 +74,9 @@ test("edits an existing rule", async () => {
     column_id: "speed-column",
     operator: "<",
     value: 4,
+    logic: "AND",
+    group_index: 1,
+    order_index: 1,
   });
   expect(onCreateRule).not.toHaveBeenCalled();
 });

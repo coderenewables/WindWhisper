@@ -20,14 +20,18 @@ export interface FlagRule {
   column_id: string;
   operator: "==" | "!=" | "<" | ">" | "<=" | ">=" | "between" | "is_null";
   value: unknown;
-  logic: "AND" | null;
+  logic: "AND" | "OR" | null;
+  group_index: number;
+  order_index: number;
 }
 
 export interface FlagRuleCreatePayload {
   column_id: string;
   operator: FlagRule["operator"];
   value?: unknown;
-  logic?: "AND";
+  logic?: "AND" | "OR";
+  group_index?: number;
+  order_index?: number;
 }
 
 export interface FlagRuleUpdatePayload extends FlagRuleCreatePayload {}

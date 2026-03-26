@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ALLOWED_OPERATORS = {"==", "!=", "<", ">", "<=", ">=", "between", "is_null"}
+ALLOWED_LOGIC = {"AND", "OR"}
 
 
 class FlagCreate(BaseModel):
@@ -40,6 +41,8 @@ class FlagRuleCreate(BaseModel):
     operator: str
     value: Any = None
     logic: str | None = "AND"
+    group_index: int = Field(default=1, ge=1)
+    order_index: int = Field(default=1, ge=1)
 
     @field_validator("operator")
     @classmethod
@@ -54,8 +57,8 @@ class FlagRuleCreate(BaseModel):
         if value is None:
             return value
         normalized = value.upper()
-        if normalized != "AND":
-            raise ValueError("Only AND logic is currently supported")
+        if normalized not in ALLOWED_LOGIC:
+            raise ValueError("logic must be AND or OR")
         return normalized
 
     @model_validator(mode="after")
@@ -79,6 +82,8 @@ class FlagRuleResponse(BaseModel):
     operator: str
     value: Any = None
     logic: str | None = "AND"
+    group_index: int = 1
+    order_index: int = 1
 
 
 class ManualFlagRequest(BaseModel):

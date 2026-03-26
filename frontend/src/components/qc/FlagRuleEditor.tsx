@@ -19,8 +19,8 @@ interface FlagRuleEditorProps {
   activeFlag: Flag | null;
   columns: DatasetColumn[];
   rules: FlagRule[];
-  onCreateRule: (payload: { column_id: string; operator: FlagRule["operator"]; value?: unknown }) => Promise<void>;
-  onUpdateRule: (ruleId: string, payload: { column_id: string; operator: FlagRule["operator"]; value?: unknown }) => Promise<void>;
+  onCreateRule: (payload: { column_id: string; operator: FlagRule["operator"]; value?: unknown; logic?: "AND" | "OR"; group_index?: number; order_index?: number }) => Promise<void>;
+  onUpdateRule: (ruleId: string, payload: { column_id: string; operator: FlagRule["operator"]; value?: unknown; logic?: "AND" | "OR"; group_index?: number; order_index?: number }) => Promise<void>;
   onDeleteRule: (ruleId: string) => Promise<void>;
 }
 
@@ -43,6 +43,9 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
   const [operator, setOperator] = useState<FlagRule["operator"]>("<");
   const [primaryValue, setPrimaryValue] = useState("");
   const [secondaryValue, setSecondaryValue] = useState("");
+  const [logic, setLogic] = useState<"AND" | "OR">("AND");
+  const [groupIndex, setGroupIndex] = useState("1");
+  const [orderIndex, setOrderIndex] = useState("1");
   const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -51,6 +54,9 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
     setOperator("<");
     setPrimaryValue("");
     setSecondaryValue("");
+    setLogic("AND");
+    setGroupIndex("1");
+    setOrderIndex("1");
   }, [activeFlag?.id]);
 
   const preview = useMemo(() => {
@@ -64,8 +70,8 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
     if (operator === "is_null") {
       return `Flag data where ${column.name} is null`;
     }
-    return `Flag data where ${column.name} ${operator} ${primaryValue || "value"}`;
-  }, [columns, operator, primaryValue, secondaryValue, selectedColumnId]);
+    return `Group ${groupIndex || "1"}, rule ${orderIndex || "1"}: ${logic} ${column.name} ${operator} ${primaryValue || "value"}`;
+  }, [columns, groupIndex, logic, operator, orderIndex, primaryValue, secondaryValue, selectedColumnId]);
 
   const temperatureColumn = columns.find((column) => column.measurement_type === "temperature");
   const speedSdColumn = columns.find((column) => column.measurement_type === "speed_sd");
@@ -75,6 +81,8 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
       return;
     }
 
+    const normalizedGroupIndex = Math.max(1, Number(groupIndex) || 1);
+    const normalizedOrderIndex = Math.max(1, Number(orderIndex) || 1);
     const value = operator === "between"
       ? [Number(primaryValue), Number(secondaryValue)]
       : operator === "is_null"
@@ -84,15 +92,18 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
           : Number(primaryValue);
 
     if (editingRuleId) {
-      await onUpdateRule(editingRuleId, { column_id: selectedColumnId, operator, value });
+      await onUpdateRule(editingRuleId, { column_id: selectedColumnId, operator, value, logic, group_index: normalizedGroupIndex, order_index: normalizedOrderIndex });
       setEditingRuleId(null);
     } else {
-      await onCreateRule({ column_id: selectedColumnId, operator, value });
+      await onCreateRule({ column_id: selectedColumnId, operator, value, logic, group_index: normalizedGroupIndex, order_index: normalizedOrderIndex });
     }
     setPrimaryValue("");
     setSecondaryValue("");
     setSelectedColumnId("");
     setOperator("<");
+    setLogic("AND");
+    setGroupIndex("1");
+    setOrderIndex("1");
   }
 
   async function applyIcingTemplate() {
@@ -100,7 +111,7 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
       return;
     }
     await onCreateRule({ column_id: temperatureColumn.id, operator: "<", value: 2 });
-    await onCreateRule({ column_id: speedSdColumn.id, operator: "==", value: 0 });
+    await onCreateRule({ column_id: speedSdColumn.id, operator: "==", value: 0, logic: "AND", group_index: 1, order_index: 2 });
   }
 
   function applyRangeTemplate() {
@@ -112,6 +123,9 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
     setOperator("between");
     setPrimaryValue("0");
     setSecondaryValue("25");
+    setLogic("AND");
+    setGroupIndex("1");
+    setOrderIndex("1");
   }
 
   function applyFlatLineTemplate() {
@@ -123,6 +137,9 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
     setOperator("==");
     setPrimaryValue("0");
     setSecondaryValue("");
+    setLogic("AND");
+    setGroupIndex("1");
+    setOrderIndex("1");
   }
 
   function startEditingRule(rule: FlagRule) {
@@ -132,6 +149,9 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
     setOperator(rule.operator);
     setPrimaryValue(values.primaryValue);
     setSecondaryValue(values.secondaryValue);
+    setLogic(rule.logic ?? "AND");
+    setGroupIndex(String(rule.group_index));
+    setOrderIndex(String(rule.order_index));
   }
 
   function cancelEditingRule() {
@@ -140,6 +160,9 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
     setOperator("<");
     setPrimaryValue("");
     setSecondaryValue("");
+    setLogic("AND");
+    setGroupIndex("1");
+    setOrderIndex("1");
   }
 
   return (
@@ -187,6 +210,14 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
               </select>
             </label>
 
+            <label className="grid gap-2 text-sm font-medium text-ink-800">
+              Logic
+              <select value={logic} onChange={(event) => setLogic(event.target.value as "AND" | "OR")} className="rounded-2xl border-ink-200 bg-white">
+                <option value="AND">AND</option>
+                <option value="OR">OR</option>
+              </select>
+            </label>
+
             {operator !== "is_null" ? (
               <label className="grid gap-2 text-sm font-medium text-ink-800">
                 Value
@@ -201,6 +232,17 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
               <input value={secondaryValue} onChange={(event) => setSecondaryValue(event.target.value)} className="rounded-2xl border-ink-200 bg-white" />
             </label>
           ) : null}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="grid gap-2 text-sm font-medium text-ink-800">
+              Group
+              <input type="number" min="1" step="1" value={groupIndex} onChange={(event) => setGroupIndex(event.target.value)} className="rounded-2xl border-ink-200 bg-white" />
+            </label>
+            <label className="grid gap-2 text-sm font-medium text-ink-800">
+              Order
+              <input type="number" min="1" step="1" value={orderIndex} onChange={(event) => setOrderIndex(event.target.value)} className="rounded-2xl border-ink-200 bg-white" />
+            </label>
+          </div>
 
           <div className="panel-muted px-4 py-4 text-sm text-ink-600">{preview}</div>
 
@@ -232,7 +274,12 @@ export function FlagRuleEditor({ activeFlag, columns, rules, onCreateRule, onUpd
               <div key={rule.id} className="rounded-2xl border border-ink-100 bg-white/70 px-3 py-3 text-sm text-ink-700">
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    {column?.name ?? "Column"} {rule.operator} {Array.isArray(rule.value) ? rule.value.join(" - ") : String(rule.value ?? "null")}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-ink-900/5 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-ink-600">Group {rule.group_index}</span>
+                      <span className="rounded-full bg-ink-900/5 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-ink-600">Order {rule.order_index}</span>
+                      <span className="rounded-full bg-teal-50 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.14em] text-teal-700">{rule.logic ?? "AND"}</span>
+                    </div>
+                    <div className="mt-2">{column?.name ?? "Column"} {rule.operator} {Array.isArray(rule.value) ? rule.value.join(" - ") : String(rule.value ?? "null")}</div>
                   </div>
                   <div className="flex gap-2">
                     <button type="button" onClick={() => startEditingRule(rule)} className="rounded-full border border-ink-200 p-2 text-ink-500 transition hover:border-ink-400 hover:text-ink-900" aria-label={`Edit rule ${rule.id}`}>

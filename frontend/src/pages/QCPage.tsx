@@ -35,6 +35,18 @@ function defaultColumnSelection(dataset: DatasetDetail) {
   return dataset.columns.slice(0, Math.min(dataset.columns.length, 6)).map((column) => column.id);
 }
 
+function sortRules(rules: FlagRule[]) {
+  return [...rules].sort((left, right) => {
+    if (left.group_index !== right.group_index) {
+      return left.group_index - right.group_index;
+    }
+    if (left.order_index !== right.order_index) {
+      return left.order_index - right.order_index;
+    }
+    return left.id.localeCompare(right.id);
+  });
+}
+
 export function QCPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const projectId = searchParams.get("projectId") ?? "";
@@ -155,7 +167,7 @@ export function QCPage() {
 
       if (resolvedFlagId) {
         const nextRules = await listFlagRules(resolvedFlagId);
-        setFlagRules(nextRules);
+        setFlagRules(sortRules(nextRules));
       } else {
         setFlagRules([]);
       }
@@ -182,7 +194,7 @@ export function QCPage() {
     void listFlagRules(activeFlagId)
       .then((rules) => {
         if (!cancelled) {
-          setFlagRules(rules);
+          setFlagRules(sortRules(rules));
           setIsLoadingQc(false);
         }
       })
@@ -368,15 +380,42 @@ export function QCPage() {
                     if (!activeFlag || !datasetDetail) {
                       return;
                     }
-                    await updateFlagRule(ruleId, payload);
-                    await refreshQcState(datasetDetail.id, activeFlag.id);
+                    const previousRules = flagRules;
+                    const optimisticRules = sortRules(
+                      flagRules.map((rule) =>
+                        rule.id === ruleId
+                          ? {
+                              ...rule,
+                              column_id: payload.column_id,
+                              operator: payload.operator,
+                              value: payload.value ?? null,
+                              logic: payload.logic ?? "AND",
+                              group_index: payload.group_index ?? rule.group_index,
+                              order_index: payload.order_index ?? rule.order_index,
+                            }
+                          : rule,
+                      ),
+                    );
+                    setFlagRules(optimisticRules);
+                    try {
+                      await updateFlagRule(ruleId, payload);
+                    } catch (requestError) {
+                      setFlagRules(previousRules);
+                      throw requestError;
+                    }
                   }}
                   onDeleteRule={async (ruleId) => {
                     if (!activeFlag || !datasetDetail) {
                       return;
                     }
-                    await deleteFlagRule(ruleId);
-                    await refreshQcState(datasetDetail.id, activeFlag.id);
+                    const previousRules = flagRules;
+                    setFlagRules(flagRules.filter((rule) => rule.id !== ruleId));
+                    try {
+                      await deleteFlagRule(ruleId);
+                    } catch (requestError) {
+                      setFlagRules(previousRules);
+                      throw requestError;
+                    }
                   }}
                 />
               </>

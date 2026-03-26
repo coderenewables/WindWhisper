@@ -103,6 +103,14 @@ function renderPage(initialEntry = "/qc?projectId=project-1&datasetId=dataset-1"
   );
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((nextResolve) => {
+    resolve = nextResolve;
+  });
+  return { promise, resolve };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   qcMocks.listProjectDatasets.mockResolvedValue({ datasets: [{ id: "dataset-1", name: "Mast A" }] });
@@ -127,6 +135,8 @@ beforeEach(() => {
       operator: "<",
       value: 2,
       logic: "AND",
+      group_index: 1,
+      order_index: 1,
     },
   ]);
   qcMocks.createFlag.mockResolvedValue({
@@ -181,6 +191,25 @@ test("updates a rule from the QC page", async () => {
       column_id: "col-2",
       operator: "<",
       value: 5,
+      logic: "AND",
+      group_index: 1,
+      order_index: 1,
     });
   });
+});
+
+test("removes a rule immediately while delete is in flight", async () => {
+  const user = userEvent.setup();
+  const deferred = createDeferred<void>();
+  qcMocks.deleteFlagRule.mockImplementation(() => deferred.promise);
+  renderPage();
+
+  await screen.findByText(/temp 2m < 2/i);
+  await user.click(screen.getByRole("button", { name: /delete rule rule-1/i }));
+
+  await waitFor(() => {
+    expect(screen.queryByText(/temp 2m < 2/i)).not.toBeInTheDocument();
+  });
+
+  deferred.resolve(undefined);
 });

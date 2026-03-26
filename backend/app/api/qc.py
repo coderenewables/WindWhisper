@@ -45,6 +45,8 @@ def _serialize_rule(rule: FlagRule) -> FlagRuleResponse:
         operator=str(rule.rule_json["operator"]),
         value=rule.rule_json.get("value"),
         logic=rule.rule_json.get("logic", "AND"),
+        group_index=int(rule.rule_json.get("group_index", 1)),
+        order_index=int(rule.rule_json.get("order_index", 1)),
     )
 
 
@@ -123,6 +125,8 @@ async def create_flag_rule(flag_id: uuid.UUID, payload: FlagRuleCreate, db: DbSe
             "operator": payload.operator,
             "value": payload.value,
             "logic": payload.logic or "AND",
+            "group_index": payload.group_index,
+            "order_index": payload.order_index,
         },
     )
     db.add(rule)
@@ -134,7 +138,15 @@ async def create_flag_rule(flag_id: uuid.UUID, payload: FlagRuleCreate, db: DbSe
 @router.get("/flags/{flag_id}/rules", response_model=list[FlagRuleResponse])
 async def list_flag_rules(flag_id: uuid.UUID, db: DbSession) -> list[FlagRuleResponse]:
     flag = await get_flag_or_404(db, flag_id)
-    return [_serialize_rule(rule) for rule in flag.rules]
+    ordered_rules = sorted(
+        flag.rules,
+        key=lambda rule: (
+            int(rule.rule_json.get("group_index", 1)),
+            int(rule.rule_json.get("order_index", 1)),
+            str(rule.id),
+        ),
+    )
+    return [_serialize_rule(rule) for rule in ordered_rules]
 
 
 @router.put("/rules/{rule_id}", response_model=FlagRuleResponse)
@@ -156,6 +168,8 @@ async def update_flag_rule(rule_id: uuid.UUID, payload: FlagRuleUpdate, db: DbSe
         "operator": payload.operator,
         "value": payload.value,
         "logic": payload.logic or "AND",
+        "group_index": payload.group_index,
+        "order_index": payload.order_index,
     }
     await db.commit()
     await db.refresh(rule)
