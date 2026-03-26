@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, Field
@@ -10,6 +11,7 @@ DEFAULT_SPEED_BIN_EDGES = [0.0, 3.0, 6.0, 9.0, 12.0, 15.0]
 DEFAULT_HISTOGRAM_BIN_COUNT = 30
 DEFAULT_WEIBULL_CURVE_POINTS = 160
 WeibullMethod = Literal["mle", "moments"]
+ShearMethod = Literal["power", "log"]
 
 
 class WindRoseRequest(BaseModel):
@@ -118,3 +120,99 @@ class WeibullResponse(BaseModel):
     excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
     fit: WeibullFitResponse
     curve_points: list[WeibullCurvePointResponse] = Field(default_factory=list)
+
+
+class ShearRequest(BaseModel):
+    speed_column_ids: list[uuid.UUID] = Field(default_factory=list)
+    direction_column_id: uuid.UUID | None = None
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    method: ShearMethod = "power"
+    num_sectors: Literal[12, 16, 36] = 12
+    target_height: float | None = Field(default=None, gt=0)
+
+
+class ShearPairResponse(BaseModel):
+    lower_column_id: uuid.UUID
+    upper_column_id: uuid.UUID
+    lower_height_m: float
+    upper_height_m: float
+    mean_value: float | None = None
+    median_value: float | None = None
+    std_value: float | None = None
+    count: int = 0
+
+
+class ShearProfilePointResponse(BaseModel):
+    height_m: float
+    mean_speed: float | None = None
+    source: Literal["measured", "extrapolated"] = "measured"
+
+
+class ShearDirectionBinResponse(BaseModel):
+    sector_index: int
+    direction: float
+    start_angle: float
+    end_angle: float
+    mean_value: float | None = None
+    median_value: float | None = None
+    std_value: float | None = None
+    count: int = 0
+
+
+class ShearTimeOfDayResponse(BaseModel):
+    hour: int
+    mean_value: float | None = None
+    median_value: float | None = None
+    std_value: float | None = None
+    count: int = 0
+
+
+class ShearResponse(BaseModel):
+    dataset_id: uuid.UUID
+    method: ShearMethod
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    direction_column_id: uuid.UUID | None = None
+    target_height: float | None = None
+    target_mean_speed: float | None = None
+    representative_pair: ShearPairResponse | None = None
+    pair_stats: list[ShearPairResponse] = Field(default_factory=list)
+    profile_points: list[ShearProfilePointResponse] = Field(default_factory=list)
+    direction_bins: list[ShearDirectionBinResponse] = Field(default_factory=list)
+    time_of_day: list[ShearTimeOfDayResponse] = Field(default_factory=list)
+
+
+class ExtrapolateRequest(BaseModel):
+    speed_column_ids: list[uuid.UUID] = Field(default_factory=list)
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    method: ShearMethod = "power"
+    target_height: float = Field(gt=0)
+    create_column: bool = False
+    column_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class ExtrapolatedColumnResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    unit: str | None = None
+    measurement_type: str | None = None
+    height_m: float | None = None
+    sensor_info: dict[str, object] | None = None
+
+
+class ExtrapolateSummaryResponse(BaseModel):
+    mean_speed: float | None = None
+    median_speed: float | None = None
+    std_speed: float | None = None
+    count: int = 0
+
+
+class ExtrapolateResponse(BaseModel):
+    dataset_id: uuid.UUID
+    method: ShearMethod
+    target_height: float
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    representative_pair: ShearPairResponse | None = None
+    summary: ExtrapolateSummaryResponse
+    timestamps: list[datetime] = Field(default_factory=list)
+    values: list[float | None] = Field(default_factory=list)
+    created_column: ExtrapolatedColumnResponse | None = None

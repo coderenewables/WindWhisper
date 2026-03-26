@@ -1,0 +1,181 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "backend-task17-tests",
+			"type": "shell",
+			"command": "C:\\ProgramData\\anaconda3\\Scripts\\conda.exe",
+			"args": [
+				"run",
+				"-n",
+				"windwhisper",
+				"python",
+				"-m",
+				"pytest",
+				"backend/tests/test_analysis.py",
+				"-q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-task17-tests",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"frontend",
+				"test",
+				"--",
+				"src/pages/AnalysisPage.test.tsx",
+				"src/pages/AnalysisPage.integration.test.tsx"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "backend-task17-tests-rerun",
+			"type": "shell",
+			"command": "C:\\ProgramData\\anaconda3\\Scripts\\conda.exe",
+			"args": [
+				"run",
+				"-n",
+				"windwhisper",
+				"python",
+				"-m",
+				"pytest",
+				"backend/tests/test_analysis.py",
+				"-q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "backend-task17-tests-final",
+			"type": "shell",
+			"command": "C:\\ProgramData\\anaconda3\\Scripts\\conda.exe",
+			"args": [
+				"run",
+				"-n",
+				"windwhisper",
+				"python",
+				"-m",
+				"pytest",
+				"backend/tests/test_analysis.py",
+				"-q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-task17-tests-final",
+			"type": "shell",
+			"command": "npm",
+			"args": [
+				"--prefix",
+				"frontend",
+				"test",
+				"--",
+				"src/pages/AnalysisPage.test.tsx",
+				"src/pages/AnalysisPage.integration.test.tsx"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "backend-task17-clean",
+			"type": "shell",
+			"command": "C:\\ProgramData\\anaconda3\\Scripts\\conda.exe",
+			"args": [
+				"run",
+				"-n",
+				"windwhisper",
+				"python",
+				"-m",
+				"pytest",
+				"backend/tests/test_analysis.py",
+				"-q"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-task17-clean",
+			"type": "shell",
+			"command": "C:\\Users\\NathishSeenivasagam\\node-v24.13.1-win-x64\\npm.cmd",
+			"args": [
+				"--prefix",
+				"frontend",
+				"test",
+				"--",
+				"src/pages/AnalysisPage.test.tsx",
+				"src/pages/AnalysisPage.integration.test.tsx"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-build-task17",
+			"type": "shell",
+			"command": "C:\\Users\\NathishSeenivasagam\\node-v24.13.1-win-x64\\npm.cmd",
+			"args": [
+				"--prefix",
+				"frontend",
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-tests-task17-all",
+			"type": "shell",
+			"command": "C:\\Users\\NathishSeenivasagam\\node-v24.13.1-win-x64\\npm.cmd",
+			"args": [
+				"--prefix",
+				"frontend",
+				"test"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-build-task17-final",
+			"type": "shell",
+			"command": "C:\\Users\\NathishSeenivasagam\\node-v24.13.1-win-x64\\npm.cmd",
+			"args": [
+				"--prefix",
+				"frontend",
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-tests-task17-final",
+			"type": "shell",
+			"command": "C:\\Users\\NathishSeenivasagam\\node-v24.13.1-win-x64\\npm.cmd",
+			"args": [
+				"--prefix",
+				"frontend",
+				"test"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-build-task17-clean",
+			"type": "shell",
+			"command": "C:\\Users\\NathishSeenivasagam\\node-v24.13.1-win-x64\\npm.cmd",
+			"args": [
+				"--prefix",
+				"frontend",
+				"run",
+				"build"
+			],
+			"isBackground": false
+		},
+		{
+			"label": "frontend-build-task17-verification",
+			"type": "shell",
+			"command": "C:\\Users\\NathishSeenivasagam\\node-v24.13.1-win-x64\\npm.cmd",
+			"args": [
+				"--prefix",
+				"frontend",
+				"run",
+				"build"
+			],
+			"isBackground": false
+		}
+	]
+}

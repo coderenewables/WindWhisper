@@ -39,6 +39,7 @@ const seededDatasetDetail = {
   columns: [
     { id: "dir-80m", name: "Dir 80m", measurement_type: "direction", unit: "deg", height_m: 80, sensor_info: null },
     { id: "spd-80m", name: "Speed 80m", measurement_type: "speed", unit: "m/s", height_m: 80, sensor_info: null },
+    { id: "spd-60m", name: "Speed 60m", measurement_type: "speed", unit: "m/s", height_m: 60, sensor_info: null },
     { id: "temp-2m", name: "Temp 2m", measurement_type: "temperature", unit: "C", height_m: 2, sensor_info: null },
   ],
 };
@@ -207,6 +208,44 @@ function buildWeibullResponse(payload: Record<string, unknown>) {
   };
 }
 
+function buildShearResponse(payload: Record<string, unknown>) {
+  const visibleRows = getVisibleRows(Array.isArray(payload.exclude_flags) ? (payload.exclude_flags as string[]) : []);
+  const method = payload.method === "log" ? "log" : "power";
+  const targetHeight = Number(payload.target_height ?? 100);
+  return {
+    dataset_id: seededDatasetSummary.id,
+    method,
+    excluded_flag_ids: Array.isArray(payload.exclude_flags) ? payload.exclude_flags : [],
+    direction_column_id: String(payload.direction_column_id ?? "dir-80m"),
+    target_height: targetHeight,
+    target_mean_speed: 8.64,
+    representative_pair: { lower_column_id: "spd-60m", upper_column_id: "spd-80m", lower_height_m: 60, upper_height_m: 80, mean_value: method === "log" ? 0.42 : 0.19, median_value: method === "log" ? 0.41 : 0.19, std_value: 0.02, count: visibleRows.length },
+    pair_stats: [{ lower_column_id: "spd-60m", upper_column_id: "spd-80m", lower_height_m: 60, upper_height_m: 80, mean_value: method === "log" ? 0.42 : 0.19, median_value: method === "log" ? 0.41 : 0.19, std_value: 0.02, count: visibleRows.length }],
+    profile_points: [
+      { height_m: 60, mean_speed: 6.81, source: "measured" },
+      { height_m: 80, mean_speed: 7.34, source: "measured" },
+      { height_m: targetHeight, mean_speed: 8.64, source: "extrapolated" },
+    ],
+    direction_bins: Array.from({ length: Number(payload.num_sectors ?? 12) }, (_, index) => ({
+      sector_index: index,
+      direction: index * (360 / Number(payload.num_sectors ?? 12)),
+      start_angle: index * (360 / Number(payload.num_sectors ?? 12)),
+      end_angle: (index + 1) * (360 / Number(payload.num_sectors ?? 12)),
+      mean_value: method === "log" ? 0.42 : 0.19,
+      median_value: method === "log" ? 0.41 : 0.19,
+      std_value: 0.02,
+      count: index < visibleRows.length ? 1 : 0,
+    })),
+    time_of_day: Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      mean_value: hour === 0 ? (method === "log" ? 0.42 : 0.19) : null,
+      median_value: hour === 0 ? (method === "log" ? 0.41 : 0.19) : null,
+      std_value: hour === 0 ? 0.02 : null,
+      count: hour === 0 ? visibleRows.length : 0,
+    })),
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={[`/analysis?projectId=${seededProject.id}&datasetId=${seededDatasetSummary.id}`]}>
@@ -253,6 +292,22 @@ beforeEach(() => {
     }
     if (url === `/analysis/weibull/${seededDatasetSummary.id}`) {
       return makeResponse(buildWeibullResponse(payload as Record<string, unknown>));
+    }
+    if (url === `/analysis/shear/${seededDatasetSummary.id}`) {
+      return makeResponse(buildShearResponse(payload as Record<string, unknown>));
+    }
+    if (url === `/analysis/extrapolate/${seededDatasetSummary.id}`) {
+      return makeResponse({
+        dataset_id: seededDatasetSummary.id,
+        method: payload && (payload as Record<string, unknown>).method === "log" ? "log" : "power",
+        target_height: Number((payload as Record<string, unknown>).target_height ?? 100),
+        excluded_flag_ids: Array.isArray((payload as Record<string, unknown>).exclude_flags) ? (payload as Record<string, unknown>).exclude_flags : [],
+        representative_pair: { lower_column_id: "spd-60m", upper_column_id: "spd-80m", lower_height_m: 60, upper_height_m: 80, mean_value: 0.19, median_value: 0.19, std_value: 0.02, count: 4 },
+        summary: { mean_speed: 8.64, median_speed: 8.54, std_speed: 0.63, count: 4 },
+        timestamps: seededRows.map((row) => row.timestamp),
+        values: seededRows.map((row) => row.speed * 1.15),
+        created_column: { id: "spd-100m", name: "Speed_100m_power", unit: "m/s", measurement_type: "speed", height_m: 100, sensor_info: null },
+      });
     }
     throw new Error(`Unhandled POST ${String(url)}`);
   });
@@ -305,4 +360,30 @@ test("switches the live analysis page from wind rose to histogram using seeded b
   });
 
   await screen.findByText(/wasp moments/i);
+});
+
+test("renders shear analysis and saves an extrapolated channel using seeded backend data", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/samples used/i);
+  await user.click(screen.getByRole("button", { name: /shear/i }));
+
+  await screen.findByText(/vertical profile/i);
+  expect(await screen.findAllByText(/60m to 80m/i)).not.toHaveLength(0);
+  await screen.findByText(/target mean speed/i);
+
+  await user.click(screen.getByRole("button", { name: /create extrapolated channel/i }));
+
+  await waitFor(() => {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/extrapolate/${seededDatasetSummary.id}`, {
+      speed_column_ids: ["spd-80m", "spd-60m"],
+      exclude_flags: [],
+      method: "power",
+      target_height: 100,
+      create_column: true,
+    });
+  });
+
+  await screen.findByText(/created derived channel: speed_100m_power/i);
 });

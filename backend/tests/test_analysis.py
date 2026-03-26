@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import numpy as np
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DataColumn, Dataset, Flag, FlaggedRange, Project, TimeseriesData
@@ -197,3 +198,92 @@ async def test_weibull_endpoint_returns_fit_parameters_and_curve(client: AsyncCl
     assert payload["fit"]["ks_stat"] < 0.08
     assert len(payload["curve_points"]) >= 96
     assert max(point["frequency_pct"] for point in payload["curve_points"]) > 0
+
+
+async def test_shear_and_extrapolation_endpoints_return_profiles_and_create_column(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="Shear Site")
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 5, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Shear Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=30),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    direction_column = DataColumn(dataset_id=dataset.id, name="Dir_80m", measurement_type="direction", height_m=80)
+    speed_60m = DataColumn(dataset_id=dataset.id, name="Speed_60m", measurement_type="speed", height_m=60)
+    speed_80m = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add_all([direction_column, speed_60m, speed_80m])
+    await db_session.flush()
+
+    alpha = 0.2
+    base_speeds = np.array([6.0, 7.5, 9.0, 10.5], dtype=float)
+    speeds_60m = base_speeds
+    speeds_80m = base_speeds * np.power(80.0 / 60.0, alpha)
+    directions = [0.0, 90.0, 180.0, 270.0]
+
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(minutes=index * 10),
+                values_json={
+                    "Dir_80m": directions[index],
+                    "Speed_60m": float(speeds_60m[index]),
+                    "Speed_80m": float(speeds_80m[index]),
+                },
+            )
+            for index in range(4)
+        ],
+    )
+    await db_session.commit()
+
+    shear_response = await client.post(
+        f"/api/analysis/shear/{dataset.id}",
+        json={
+            "direction_column_id": str(direction_column.id),
+            "target_height": 100,
+            "method": "power",
+        },
+    )
+
+    assert shear_response.status_code == 200
+    shear_payload = shear_response.json()
+    assert shear_payload["method"] == "power"
+    assert len(shear_payload["pair_stats"]) == 1
+    assert abs(shear_payload["pair_stats"][0]["mean_value"] - alpha) < 1e-6
+    assert len(shear_payload["direction_bins"]) == 12
+    assert len(shear_payload["time_of_day"]) == 24
+    assert shear_payload["target_height"] == 100
+    assert shear_payload["target_mean_speed"] > shear_payload["profile_points"][1]["mean_speed"]
+
+    extrapolate_response = await client.post(
+        f"/api/analysis/extrapolate/{dataset.id}",
+        json={
+            "target_height": 100,
+            "method": "power",
+            "create_column": True,
+            "column_name": "Speed_100m_power",
+        },
+    )
+
+    assert extrapolate_response.status_code == 200
+    extrapolate_payload = extrapolate_response.json()
+    assert extrapolate_payload["created_column"]["name"] == "Speed_100m_power"
+    assert extrapolate_payload["summary"]["count"] == 4
+    assert len(extrapolate_payload["values"]) == 4
+
+    refreshed_dataset = await db_session.get(Dataset, dataset.id)
+    assert refreshed_dataset is not None
+    result = await db_session.execute(
+        select(TimeseriesData).where(TimeseriesData.dataset_id == dataset.id).order_by(TimeseriesData.timestamp.asc())
+    )
+    rows = result.scalars().all()
+    assert all("Speed_100m_power" in row.values_json for row in rows)

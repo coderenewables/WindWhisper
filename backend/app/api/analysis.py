@@ -2,19 +2,31 @@ from __future__ import annotations
 
 import math
 import uuid
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DataColumn
+from app.models import DataColumn, TimeseriesData
 from app.schemas.analysis import (
+    ExtrapolatedColumnResponse,
+    ExtrapolateRequest,
+    ExtrapolateResponse,
+    ExtrapolateSummaryResponse,
     HistogramBinResponse,
     HistogramRequest,
     HistogramResponse,
     HistogramStatsResponse,
+    ShearDirectionBinResponse,
+    ShearPairResponse,
+    ShearProfilePointResponse,
+    ShearRequest,
+    ShearResponse,
+    ShearTimeOfDayResponse,
     WeibullCurvePointResponse,
     WeibullFitResponse,
     WeibullRequest,
@@ -26,6 +38,7 @@ from app.schemas.analysis import (
 )
 from app.services.qc_engine import filter_flagged_data, get_clean_dataframe, get_dataset_or_404, load_dataset_frame
 from app.services.weibull import fit_weibull, weibull_pdf
+from app.services.wind_shear import extrapolate_to_height, shear_profile
 
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
@@ -135,6 +148,66 @@ def _apply_numeric_bounds(series: pd.Series, minimum: float | None, maximum: flo
     if maximum is not None:
         bounded = bounded.loc[bounded <= maximum]
     return bounded
+
+
+def _speed_columns_with_heights(dataset_columns: list[DataColumn], requested_ids: list[uuid.UUID]) -> list[DataColumn]:
+    selected = [column for column in dataset_columns if column.measurement_type == "speed" and column.height_m is not None]
+    if requested_ids:
+        requested_set = set(requested_ids)
+        selected = [column for column in selected if column.id in requested_set]
+        if len(selected) != len(requested_set):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One or more requested speed columns do not belong to this dataset")
+
+    unique_heights = {float(column.height_m) for column in selected}
+    if len(unique_heights) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least two wind speed columns with distinct heights are required for shear analysis",
+        )
+
+    return sorted(selected, key=lambda column: (float(column.height_m or 0.0), column.name))
+
+
+def _serialize_shear_response(
+    dataset_id: uuid.UUID,
+    payload: ShearRequest,
+    profile: dict[str, object],
+) -> ShearResponse:
+    return ShearResponse(
+        dataset_id=dataset_id,
+        method=payload.method,
+        excluded_flag_ids=payload.exclude_flags,
+        direction_column_id=payload.direction_column_id,
+        target_height=payload.target_height,
+        target_mean_speed=profile.get("target_mean_speed"),
+        representative_pair=ShearPairResponse(**profile["representative_pair"]) if profile.get("representative_pair") else None,
+        pair_stats=[ShearPairResponse(**pair) for pair in profile.get("pair_stats", [])],
+        profile_points=[ShearProfilePointResponse(**point) for point in profile.get("profile_points", [])],
+        direction_bins=[ShearDirectionBinResponse(**sector) for sector in profile.get("direction_bins", [])],
+        time_of_day=[ShearTimeOfDayResponse(**item) for item in profile.get("time_of_day", [])],
+    )
+
+
+def _summary_from_values(values: np.ndarray) -> ExtrapolateSummaryResponse:
+    valid = values[np.isfinite(values)]
+    if valid.size == 0:
+        return ExtrapolateSummaryResponse(count=0)
+    return ExtrapolateSummaryResponse(
+        mean_speed=float(np.mean(valid)),
+        median_speed=float(np.median(valid)),
+        std_speed=float(np.std(valid, ddof=0)),
+        count=int(valid.size),
+    )
+
+
+def _json_safe_value(value: object) -> object:
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _json_safe_value(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_json_safe_value(item) for item in value]
+    return value
 
 
 @router.post("/wind-rose/{dataset_id}", response_model=WindRoseResponse)
@@ -318,4 +391,137 @@ async def create_weibull_fit(
             )
             for x_value, pdf_value in zip(x_values, pdf_values, strict=False)
         ],
+    )
+
+
+@router.post("/shear/{dataset_id}", response_model=ShearResponse)
+async def create_shear_analysis(
+    dataset_id: uuid.UUID,
+    payload: ShearRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ShearResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    speed_columns = _speed_columns_with_heights(dataset.columns, payload.speed_column_ids)
+    direction_column = None
+    if payload.direction_column_id is not None:
+        direction_column = _resolve_column(dataset.columns, payload.direction_column_id, "direction_column_id")
+
+    column_ids = [column.id for column in speed_columns]
+    if direction_column is not None:
+        column_ids.append(direction_column.id)
+
+    loaded = await load_dataset_frame(db, dataset.id, column_ids=column_ids)
+    filtered = await filter_flagged_data(db, loaded.frame, dataset.id, loaded.columns_by_id, payload.exclude_flags)
+
+    speeds_by_height = {
+        float(column.height_m): _coerce_numeric_series(filtered, column.name).to_numpy(dtype=float)
+        for column in speed_columns
+    }
+
+    if len({len(values) for values in speeds_by_height.values()}) != 1:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Speed columns do not align for shear analysis")
+
+    direction_values = None
+    if direction_column is not None:
+        direction_values = pd.to_numeric(filtered[direction_column.name], errors="coerce").to_numpy(dtype=float)
+
+    profile = shear_profile(
+        speeds_by_height,
+        column_ids_by_height={float(column.height_m): column.id for column in speed_columns},
+        timestamps=[timestamp.to_pydatetime() if hasattr(timestamp, "to_pydatetime") else timestamp for timestamp in filtered.index.to_list()],
+        directions=direction_values,
+        method=payload.method,
+        num_sectors=payload.num_sectors,
+        target_height=payload.target_height,
+    )
+    return _serialize_shear_response(dataset.id, payload, profile)
+
+
+@router.post("/extrapolate/{dataset_id}", response_model=ExtrapolateResponse)
+async def create_extrapolated_series(
+    dataset_id: uuid.UUID,
+    payload: ExtrapolateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ExtrapolateResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    speed_columns = _speed_columns_with_heights(dataset.columns, payload.speed_column_ids)
+    loaded = await load_dataset_frame(db, dataset.id, column_ids=[column.id for column in speed_columns])
+    filtered = await filter_flagged_data(db, loaded.frame, dataset.id, loaded.columns_by_id, payload.exclude_flags)
+
+    speeds_by_height = {
+        float(column.height_m): pd.to_numeric(filtered[column.name], errors="coerce").to_numpy(dtype=float)
+        for column in speed_columns
+    }
+    extrapolated = extrapolate_to_height(
+        speeds_by_height,
+        column_ids_by_height={float(column.height_m): column.id for column in speed_columns},
+        target_height=payload.target_height,
+        method=payload.method,
+    )
+    values = np.asarray(extrapolated["values"], dtype=float)
+    created_column = None
+
+    if payload.create_column:
+        representative = extrapolated.get("representative_pair")
+        if representative is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unable to create an extrapolated channel without a representative shear pair")
+
+        source_unit = speed_columns[0].unit
+        column_name = payload.column_name or f"Speed_{payload.target_height:g}m_{payload.method}"
+        if any(column.name == column_name for column in dataset.columns):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A column with this name already exists in the dataset")
+
+        column = DataColumn(
+            dataset_id=dataset.id,
+            name=column_name,
+            unit=source_unit,
+            measurement_type="speed",
+            height_m=payload.target_height,
+            sensor_info={
+                "derived": True,
+                "method": payload.method,
+                "source": "wind_shear_extrapolation",
+                "representative_pair": _json_safe_value(representative),
+            },
+        )
+        db.add(column)
+        await db.flush()
+
+        rows = (
+            await db.execute(
+                select(TimeseriesData)
+                .where(TimeseriesData.dataset_id == dataset.id)
+                .order_by(TimeseriesData.timestamp.asc(), TimeseriesData.id.asc())
+            )
+        ).scalars().all()
+
+        if len(rows) != len(values):
+            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Extrapolated values do not align with dataset rows")
+
+        for row, value in zip(rows, values, strict=False):
+            row.values_json = {**row.values_json, column_name: None if not np.isfinite(value) else float(value)}
+
+        await db.commit()
+        created_column = ExtrapolatedColumnResponse(
+            id=column.id,
+            name=column.name,
+            unit=column.unit,
+            measurement_type=column.measurement_type,
+            height_m=column.height_m,
+            sensor_info=column.sensor_info,
+        )
+    else:
+        await db.rollback()
+
+    timestamps = [timestamp.to_pydatetime() if hasattr(timestamp, "to_pydatetime") else timestamp for timestamp in loaded.frame.index.to_list()]
+    return ExtrapolateResponse(
+        dataset_id=dataset.id,
+        method=payload.method,
+        target_height=payload.target_height,
+        excluded_flag_ids=payload.exclude_flags,
+        representative_pair=ShearPairResponse(**extrapolated["representative_pair"]) if extrapolated.get("representative_pair") else None,
+        summary=_summary_from_values(values),
+        timestamps=timestamps,
+        values=[None if not np.isfinite(value) else float(value) for value in values],
+        created_column=created_column,
     )

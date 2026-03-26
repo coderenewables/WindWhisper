@@ -2,14 +2,15 @@ import { AlertTriangle, BarChart3, Compass, GaugeCircle, ShieldCheck, Wind } fro
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { getHistogramAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
+import { createExtrapolatedChannel, getHistogramAnalysis, getShearAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
 import { FrequencyHistogram } from "../components/analysis/FrequencyHistogram";
+import { WindShearPanel } from "../components/analysis/WindShearPanel";
 import { getDataset, listProjectDatasets } from "../api/datasets";
 import { listFlags } from "../api/qc";
 import { WindRoseChart } from "../components/analysis/WindRoseChart";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { useProjectStore } from "../stores/projectStore";
-import type { HistogramRequest, HistogramResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
+import type { HistogramRequest, HistogramResponse, ShearMethod, ShearResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
 import type { DatasetColumn, DatasetDetail, DatasetSummary } from "../types/dataset";
 import type { Flag } from "../types/qc";
 
@@ -18,7 +19,7 @@ type AnalysisTab = "wind-rose" | "histogram" | "shear" | "turbulence" | "air-den
 const analysisTabs: Array<{ id: AnalysisTab; label: string; description: string }> = [
   { id: "wind-rose", label: "Wind Rose", description: "Directional frequency, mean speed, and energy." },
   { id: "histogram", label: "Histogram", description: "Frequency distributions for any measured channel, with Weibull overlays for wind speed." },
-  { id: "shear", label: "Shear", description: "Vertical profile and extrapolation tooling remains staged." },
+  { id: "shear", label: "Shear", description: "Vertical profile, directional shear, and target-height extrapolation." },
   { id: "turbulence", label: "Turbulence", description: "IEC TI analytics will follow in the next analysis tasks." },
   { id: "air-density", label: "Air Density", description: "Density and wind power density calculations will be added later." },
   { id: "extreme-wind", label: "Extreme Wind", description: "Return-period and Gumbel analysis is queued after core charts." },
@@ -68,19 +69,28 @@ export function AnalysisPage() {
   const [histogramBinWidth, setHistogramBinWidth] = useState("");
   const [roseData, setRoseData] = useState<WindRoseResponse | null>(null);
   const [histogramData, setHistogramData] = useState<HistogramResponse | null>(null);
+  const [shearData, setShearData] = useState<ShearResponse | null>(null);
   const [weibullData, setWeibullData] = useState<WeibullResponse | null>(null);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
   const [isLoadingDatasetDetail, setIsLoadingDatasetDetail] = useState(false);
   const [isLoadingFlags, setIsLoadingFlags] = useState(false);
   const [isLoadingWindRose, setIsLoadingWindRose] = useState(false);
   const [isLoadingHistogram, setIsLoadingHistogram] = useState(false);
+  const [isLoadingShear, setIsLoadingShear] = useState(false);
   const [isLoadingWeibull, setIsLoadingWeibull] = useState(false);
+  const [isCreatingExtrapolatedChannel, setIsCreatingExtrapolatedChannel] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [windRoseError, setWindRoseError] = useState<string | null>(null);
   const [histogramError, setHistogramError] = useState<string | null>(null);
+  const [shearError, setShearError] = useState<string | null>(null);
   const [weibullError, setWeibullError] = useState<string | null>(null);
+  const [createChannelError, setCreateChannelError] = useState<string | null>(null);
+  const [createdChannelName, setCreatedChannelName] = useState<string | null>(null);
   const [showWeibullFit, setShowWeibullFit] = useState(true);
   const [weibullMethod, setWeibullMethod] = useState<WeibullMethod>("mle");
+  const [shearMethod, setShearMethod] = useState<ShearMethod>("power");
+  const [shearTargetHeight, setShearTargetHeight] = useState("100");
+  const [selectedShearDirectionColumnId, setSelectedShearDirectionColumnId] = useState("");
   const { projects, fetchProjects } = useProjectStore();
 
   useEffect(() => {
@@ -134,8 +144,10 @@ export function AnalysisPage() {
       setSelectedDirectionColumnId("");
       setSelectedValueColumnId("");
       setSelectedHistogramColumnId("");
+      setSelectedShearDirectionColumnId("");
       setRoseData(null);
       setHistogramData(null);
+      setShearData(null);
       setWeibullData(null);
       return;
     }
@@ -154,6 +166,7 @@ export function AnalysisPage() {
         setSelectedDirectionColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultDirectionColumn(response.columns)));
         setSelectedValueColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultValueColumn(response.columns)));
         setSelectedHistogramColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultValueColumn(response.columns)));
+        setSelectedShearDirectionColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultDirectionColumn(response.columns)));
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -168,6 +181,13 @@ export function AnalysisPage() {
   }, [datasetId]);
 
   const histogramColumns = datasetDetail?.columns ?? [];
+  const shearSpeedColumns = useMemo(
+    () =>
+      datasetDetail?.columns.filter(
+        (column) => column.measurement_type === "speed" && column.height_m != null && column.sensor_info?.derived !== true,
+      ) ?? [],
+    [datasetDetail],
+  );
   const selectedHistogramColumn = useMemo(
     () => histogramColumns.find((column) => column.id === selectedHistogramColumnId) ?? null,
     [histogramColumns, selectedHistogramColumnId],
@@ -189,6 +209,11 @@ export function AnalysisPage() {
       ...(parsedBinWidth !== undefined && Number.isFinite(parsedBinWidth) && parsedBinWidth > 0 ? { bin_width: parsedBinWidth } : {}),
     };
   }, [excludedFlagIds, histogramBinWidth, histogramBins, selectedHistogramColumnId]);
+
+  const parsedShearTargetHeight = useMemo(() => {
+    const parsed = Number(shearTargetHeight);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }, [shearTargetHeight]);
 
   useEffect(() => {
     if (isWeibullAvailable) {
@@ -267,6 +292,44 @@ export function AnalysisPage() {
       cancelled = true;
     };
   }, [activeTab, datasetId, excludedFlagIds, numSectors, selectedDirectionColumnId, selectedValueColumnId]);
+
+  useEffect(() => {
+    if (activeTab !== "shear" || !datasetId || shearSpeedColumns.length < 2) {
+      setShearError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingShear(true);
+    setShearError(null);
+    setCreateChannelError(null);
+
+    void getShearAnalysis(datasetId, {
+      speed_column_ids: shearSpeedColumns.map((column) => column.id),
+      direction_column_id: selectedShearDirectionColumnId || undefined,
+      exclude_flags: excludedFlagIds,
+      method: shearMethod,
+      num_sectors: numSectors,
+      ...(parsedShearTargetHeight != null ? { target_height: parsedShearTargetHeight } : {}),
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setShearData(response);
+          setIsLoadingShear(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setShearData(null);
+          setShearError(error instanceof Error ? error.message : "Unable to calculate wind shear");
+          setIsLoadingShear(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetId, excludedFlagIds, numSectors, parsedShearTargetHeight, selectedShearDirectionColumnId, shearMethod, shearSpeedColumns]);
 
   useEffect(() => {
     if (activeTab !== "histogram" || !datasetId || !histogramRequest) {
@@ -366,6 +429,45 @@ export function AnalysisPage() {
 
   function toggleExcludedFlag(flagId: string) {
     setExcludedFlagIds((current) => (current.includes(flagId) ? current.filter((item) => item !== flagId) : [...current, flagId]));
+  }
+
+  async function handleCreateExtrapolatedChannel() {
+    if (!datasetId || shearSpeedColumns.length < 2 || parsedShearTargetHeight == null) {
+      return;
+    }
+
+    setIsCreatingExtrapolatedChannel(true);
+    setCreateChannelError(null);
+    setCreatedChannelName(null);
+
+    try {
+      const response = await createExtrapolatedChannel(datasetId, {
+        speed_column_ids: shearSpeedColumns.map((column) => column.id),
+        exclude_flags: excludedFlagIds,
+        method: shearMethod,
+        target_height: parsedShearTargetHeight,
+        create_column: true,
+      });
+
+      if (response.created_column) {
+        const createdColumn = response.created_column;
+        setCreatedChannelName(createdColumn.name);
+        setDatasetDetail((current) => {
+          if (!current || current.columns.some((column) => column.id === createdColumn.id)) {
+            return current;
+          }
+          return {
+            ...current,
+            column_count: current.column_count + 1,
+            columns: [...current.columns, createdColumn],
+          };
+        });
+      }
+    } catch (error) {
+      setCreateChannelError(error instanceof Error ? error.message : "Unable to create extrapolated channel");
+    } finally {
+      setIsCreatingExtrapolatedChannel(false);
+    }
   }
 
   return (
@@ -637,6 +739,82 @@ export function AnalysisPage() {
                     weibullData={weibullData}
                     isLoadingWeibull={isLoadingWeibull}
                     weibullError={weibullError}
+                  />
+                )}
+              </div>
+            </section>
+          ) : activeTab === "shear" ? (
+            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="space-y-4">
+                <section className="panel-surface p-5">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
+                  <div className="mt-4 space-y-4">
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Direction column
+                      <select value={selectedShearDirectionColumnId} onChange={(event) => setSelectedShearDirectionColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={directionColumns.length === 0}>
+                        <option value="">No direction grouping</option>
+                        {directionColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="rounded-2xl border border-ink-100 bg-white/80 px-4 py-4 text-sm text-ink-700">
+                      <div className="font-semibold text-ink-900">Measured speed heights</div>
+                      <div className="mt-3 space-y-2">
+                        {shearSpeedColumns.map((column) => (
+                          <div key={column.id} className="flex items-center justify-between gap-3">
+                            <span>{column.name}</span>
+                            <span className="rounded-full bg-ink-900/5 px-2 py-1 text-xs font-medium uppercase tracking-[0.14em] text-ink-600">{column.height_m}m</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="panel-surface p-5">
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
+                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
+                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
+                  {!isLoadingFlags && flags.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {flags.map((flag) => {
+                        const excluded = excludedFlagIds.includes(flag.id);
+                        return (
+                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
+                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
+                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
+                            <span className="flex-1 text-sm text-ink-700">
+                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
+                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
+              </aside>
+
+              <div className="space-y-4">
+                {shearSpeedColumns.length < 2 ? (
+                  <section className="panel-surface p-8 text-sm text-ink-600">At least two wind speed columns with distinct heights are required to calculate shear.</section>
+                ) : (
+                  <WindShearPanel
+                    data={shearData}
+                    isLoading={isLoadingShear}
+                    error={shearError}
+                    method={shearMethod}
+                    targetHeight={shearTargetHeight}
+                    onTargetHeightChange={setShearTargetHeight}
+                    onMethodChange={setShearMethod}
+                    onCreateChannel={handleCreateExtrapolatedChannel}
+                    isCreatingChannel={isCreatingExtrapolatedChannel}
+                    createChannelError={createChannelError}
+                    createdChannelName={createdChannelName}
                   />
                 )}
               </div>

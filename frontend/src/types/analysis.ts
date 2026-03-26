@@ -101,3 +101,101 @@ export interface WeibullRequest extends HistogramRequest {
   method?: WeibullMethod;
   curve_points?: number;
 }
+
+export type ShearMethod = "power" | "log";
+
+export interface ShearPair {
+  lower_column_id: string;
+  upper_column_id: string;
+  lower_height_m: number;
+  upper_height_m: number;
+  mean_value: number | null;
+  median_value: number | null;
+  std_value: number | null;
+  count: number;
+}
+
+export interface ShearProfilePoint {
+  height_m: number;
+  mean_speed: number | null;
+  source: "measured" | "extrapolated";
+}
+
+export interface ShearDirectionBin {
+  sector_index: number;
+  direction: number;
+  start_angle: number;
+  end_angle: number;
+  mean_value: number | null;
+  median_value: number | null;
+  std_value: number | null;
+  count: number;
+}
+
+export interface ShearTimeOfDayBin {
+  hour: number;
+  mean_value: number | null;
+  median_value: number | null;
+  std_value: number | null;
+  count: number;
+}
+
+export interface ShearRequest {
+  speed_column_ids?: string[];
+  direction_column_id?: string;
+  exclude_flags?: string[];
+  method?: ShearMethod;
+  num_sectors?: 12 | 16 | 36;
+  target_height?: number;
+}
+
+export interface ShearResponse {
+  dataset_id: string;
+  method: ShearMethod;
+  excluded_flag_ids: string[];
+  direction_column_id: string | null;
+  target_height: number | null;
+  target_mean_speed: number | null;
+  representative_pair: ShearPair | null;
+  pair_stats: ShearPair[];
+  profile_points: ShearProfilePoint[];
+  direction_bins: ShearDirectionBin[];
+  time_of_day: ShearTimeOfDayBin[];
+}
+
+export interface ExtrapolatedColumn {
+  id: string;
+  name: string;
+  unit: string | null;
+  measurement_type: string | null;
+  height_m: number | null;
+  sensor_info: Record<string, unknown> | null;
+}
+
+export interface ExtrapolateSummary {
+  mean_speed: number | null;
+  median_speed: number | null;
+  std_speed: number | null;
+  count: number;
+}
+
+export interface ExtrapolateRequest {
+  speed_column_ids?: string[];
+  exclude_flags?: string[];
+  method?: ShearMethod;
+  target_height: number;
+  create_column?: boolean;
+  column_name?: string;
+}
+
+export interface ExtrapolateResponse {
+  dataset_id: string;
+  method: ShearMethod;
+  target_height: number;
+  excluded_flag_ids: string[];
+  representative_pair: ShearPair | null;
+  summary: ExtrapolateSummary;
+  timestamps: string[];
+  values: Array<number | null>;
+  created_column: ExtrapolatedColumn | null;
+}
