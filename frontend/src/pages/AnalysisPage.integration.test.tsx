@@ -40,7 +40,9 @@ const seededDatasetDetail = {
     { id: "dir-80m", name: "Dir 80m", measurement_type: "direction", unit: "deg", height_m: 80, sensor_info: null },
     { id: "spd-80m", name: "Speed 80m", measurement_type: "speed", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "spd-60m", name: "Speed 60m", measurement_type: "speed", unit: "m/s", height_m: 60, sensor_info: null },
+    { id: "sd-80m", name: "Speed SD 80m", measurement_type: "speed_sd", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "temp-2m", name: "Temp 2m", measurement_type: "temperature", unit: "C", height_m: 2, sensor_info: null },
+    { id: "press-2m", name: "Pressure hPa", measurement_type: "pressure", unit: "hPa", height_m: 2, sensor_info: null },
   ],
 };
 
@@ -57,10 +59,10 @@ const seededFlags = [
 ];
 
 const seededRows = [
-  { timestamp: "2025-03-01T00:00:00Z", direction: 350, speed: 5, temp: 7 },
-  { timestamp: "2025-03-01T00:10:00Z", direction: 10, speed: 7, temp: 6 },
-  { timestamp: "2025-03-01T00:20:00Z", direction: 95, speed: 8, temp: 5 },
-  { timestamp: "2025-03-01T00:30:00Z", direction: 185, speed: 9, temp: 4 },
+  { timestamp: "2025-03-01T00:00:00Z", direction: 350, speed: 5, temp: 7, pressure: 1013.2 },
+  { timestamp: "2025-03-01T00:10:00Z", direction: 10, speed: 7, temp: 6, pressure: 1012.4 },
+  { timestamp: "2025-03-01T00:20:00Z", direction: 95, speed: 8, temp: 5, pressure: 1011.9 },
+  { timestamp: "2025-03-01T00:30:00Z", direction: 185, speed: 9, temp: 4, pressure: 1010.8 },
 ];
 
 const excludedTimestamps = new Set(["2025-03-01T00:30:00Z"]);
@@ -246,6 +248,98 @@ function buildShearResponse(payload: Record<string, unknown>) {
   };
 }
 
+function buildTurbulenceResponse(payload: Record<string, unknown>) {
+  const visibleRows = getVisibleRows(Array.isArray(payload.exclude_flags) ? (payload.exclude_flags as string[]) : []);
+  const speedValues = visibleRows.map((row) => row.speed);
+  const tiValues = visibleRows.map((row) => 0.11 + row.speed * 0.004);
+  const directionBins = Array.from({ length: Number(payload.num_sectors ?? 12) }, (_, index) => ({
+    sector_index: index,
+    direction: index * (360 / Number(payload.num_sectors ?? 12)),
+    start_angle: index * (360 / Number(payload.num_sectors ?? 12)),
+    end_angle: (index + 1) * (360 / Number(payload.num_sectors ?? 12)),
+    mean_ti: index < visibleRows.length ? tiValues[index % tiValues.length] : null,
+    representative_ti: index < visibleRows.length ? tiValues[index % tiValues.length] + 0.02 : null,
+    p90_ti: index < visibleRows.length ? tiValues[index % tiValues.length] + 0.03 : null,
+    sample_count: index < visibleRows.length ? 1 : 0,
+  }));
+  return {
+    dataset_id: seededDatasetSummary.id,
+    speed_column_id: String(payload.speed_column_id),
+    sd_column_id: String(payload.sd_column_id),
+    direction_column_id: String(payload.direction_column_id ?? "dir-80m"),
+    excluded_flag_ids: Array.isArray(payload.exclude_flags) ? payload.exclude_flags : [],
+    bin_width: Number(payload.bin_width ?? 1),
+    num_sectors: Number(payload.num_sectors ?? 12),
+    summary: {
+      mean_ti: tiValues.reduce((sum, value) => sum + value, 0) / tiValues.length,
+      median_ti: [...tiValues].sort((left, right) => left - right)[Math.floor(tiValues.length / 2)],
+      p90_ti: [...tiValues].sort((left, right) => left - right)[Math.floor(tiValues.length * 0.9)],
+      characteristic_ti_15: 0.185,
+      iec_class: "Above IEC Class A",
+      sample_count: tiValues.length,
+      mean_speed: speedValues.reduce((sum, value) => sum + value, 0) / speedValues.length,
+    },
+    scatter_points: visibleRows.map((row) => ({ speed: row.speed, ti: 0.11 + row.speed * 0.004 })),
+    speed_bins: [
+      { lower: 5, upper: 7, center: 6, sample_count: 2, mean_ti: 0.135, representative_ti: 0.155, p90_ti: 0.16, iec_class_a: 0.269, iec_class_b: 0.235, iec_class_c: 0.202 },
+      { lower: 7, upper: 9, center: 8, sample_count: 2, mean_ti: 0.143, representative_ti: 0.163, p90_ti: 0.168, iec_class_a: 0.232, iec_class_b: 0.203, iec_class_c: 0.174 },
+    ],
+    direction_bins: directionBins,
+    iec_curves: [
+      { label: "IEC Class A", reference_intensity: 0.16, points: [{ speed: 5, ti: 0.299 }, { speed: 10, ti: 0.21 }, { speed: 15, ti: 0.18 }] },
+      { label: "IEC Class B", reference_intensity: 0.14, points: [{ speed: 5, ti: 0.262 }, { speed: 10, ti: 0.184 }, { speed: 15, ti: 0.157 }] },
+      { label: "IEC Class C", reference_intensity: 0.12, points: [{ speed: 5, ti: 0.224 }, { speed: 10, ti: 0.158 }, { speed: 15, ti: 0.135 }] },
+    ],
+  };
+}
+
+function buildAirDensityResponse(payload: Record<string, unknown>) {
+  const visibleRows = getVisibleRows(Array.isArray(payload.exclude_flags) ? (payload.exclude_flags as string[]) : []);
+  const pressureSource = payload.pressure_source === "estimated" ? "estimated" : "measured";
+  const elevation = typeof payload.elevation_m === "number" ? payload.elevation_m : seededProject.elevation;
+  const densityPoints = visibleRows.map((row) => {
+    const pressure = pressureSource === "estimated" ? 1011.8 : row.pressure;
+    const density = (pressure * 100) / (287.05 * (row.temp + 273.15));
+    return {
+      timestamp: row.timestamp,
+      density,
+      wind_power_density: 0.5 * density * row.speed ** 3,
+    };
+  });
+  const meanDensity = densityPoints.reduce((sum, point) => sum + point.density, 0) / densityPoints.length;
+  const meanWpd = densityPoints.reduce((sum, point) => sum + point.wind_power_density, 0) / densityPoints.length;
+  return {
+    dataset_id: seededDatasetSummary.id,
+    temperature_column_id: String(payload.temperature_column_id),
+    speed_column_id: String(payload.speed_column_id),
+    pressure_column_id: payload.pressure_column_id ? String(payload.pressure_column_id) : null,
+    excluded_flag_ids: Array.isArray(payload.exclude_flags) ? payload.exclude_flags : [],
+    summary: {
+      pressure_source: pressureSource,
+      elevation_m: elevation,
+      estimated_pressure_hpa: pressureSource === "estimated" ? 1011.8 : null,
+      mean_density: meanDensity,
+      median_density: meanDensity,
+      std_density: 0.004,
+      min_density: Math.min(...densityPoints.map((point) => point.density)),
+      max_density: Math.max(...densityPoints.map((point) => point.density)),
+      mean_wind_power_density: meanWpd,
+      annual_wind_power_density: meanWpd,
+      sample_count: densityPoints.length,
+    },
+    density_points: densityPoints,
+    monthly: [
+      {
+        month: 3,
+        label: "Mar",
+        mean_density: meanDensity,
+        mean_wind_power_density: meanWpd,
+        sample_count: densityPoints.length,
+      },
+    ],
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={[`/analysis?projectId=${seededProject.id}&datasetId=${seededDatasetSummary.id}`]}>
@@ -295,6 +389,12 @@ beforeEach(() => {
     }
     if (url === `/analysis/shear/${seededDatasetSummary.id}`) {
       return makeResponse(buildShearResponse(payload as Record<string, unknown>));
+    }
+    if (url === `/analysis/turbulence/${seededDatasetSummary.id}`) {
+      return makeResponse(buildTurbulenceResponse(payload as Record<string, unknown>));
+    }
+    if (url === `/analysis/air-density/${seededDatasetSummary.id}`) {
+      return makeResponse(buildAirDensityResponse(payload as Record<string, unknown>));
     }
     if (url === `/analysis/extrapolate/${seededDatasetSummary.id}`) {
       return makeResponse({
@@ -386,4 +486,50 @@ test("renders shear analysis and saves an extrapolated channel using seeded back
   });
 
   await screen.findByText(/created derived channel: speed_100m_power/i);
+});
+
+test("renders turbulence analysis using seeded backend data", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/samples used/i);
+  await user.click(screen.getByRole("button", { name: /turbulence/i }));
+
+  await screen.findByText(/iec turbulence intensity diagnostics/i);
+  await screen.findByText(/characteristic ti at 15 m\/s/i);
+  await screen.findByText(/above iec class a/i);
+
+  await waitFor(() => {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/turbulence/${seededDatasetSummary.id}`, {
+      speed_column_id: "spd-80m",
+      sd_column_id: "sd-80m",
+      direction_column_id: "dir-80m",
+      exclude_flags: [],
+      bin_width: 1,
+      num_sectors: 12,
+    });
+  });
+});
+
+test("renders air density analysis using seeded backend data", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/samples used/i);
+  await user.click(screen.getByRole("button", { name: /air density/i }));
+
+  await screen.findByText(/density and wind power density/i);
+  await screen.findByText(/mean density/i);
+  await screen.findByText(/mean wind power density/i, { selector: "div" });
+
+  await waitFor(() => {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/air-density/${seededDatasetSummary.id}`, {
+      temperature_column_id: "temp-2m",
+      speed_column_id: "spd-80m",
+      pressure_column_id: "press-2m",
+      pressure_source: "auto",
+      elevation_m: 12,
+      exclude_flags: [],
+    });
+  });
 });

@@ -11,8 +11,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DataColumn, TimeseriesData
+from app.models import DataColumn, Project, TimeseriesData
 from app.schemas.analysis import (
+    AirDensityMonthlyResponse,
+    AirDensityPointResponse,
+    AirDensityRequest,
+    AirDensityResponse,
+    AirDensitySummaryResponse,
     ExtrapolatedColumnResponse,
     ExtrapolateRequest,
     ExtrapolateResponse,
@@ -27,6 +32,14 @@ from app.schemas.analysis import (
     ShearRequest,
     ShearResponse,
     ShearTimeOfDayResponse,
+    TurbulenceCurvePointResponse,
+    TurbulenceDirectionBinResponse,
+    TurbulenceIecCurveResponse,
+    TurbulenceRequest,
+    TurbulenceResponse,
+    TurbulenceScatterPointResponse,
+    TurbulenceSpeedBinResponse,
+    TurbulenceSummaryResponse,
     WeibullCurvePointResponse,
     WeibullFitResponse,
     WeibullRequest,
@@ -36,7 +49,9 @@ from app.schemas.analysis import (
     WindRoseSectorResponse,
     WindRoseSpeedBinResponse,
 )
+from app.services.air_density import air_density_summary, build_density_points, calculate_air_density, estimate_pressure_from_elevation, monthly_averages, wind_power_density
 from app.services.qc_engine import filter_flagged_data, get_clean_dataframe, get_dataset_or_404, load_dataset_frame
+from app.services.turbulence import build_scatter_points, calculate_ti, iec_reference_curves, ti_by_direction, ti_by_speed_bin, ti_summary
 from app.services.weibull import fit_weibull, weibull_pdf
 from app.services.wind_shear import extrapolate_to_height, shear_profile
 
@@ -200,6 +215,12 @@ def _summary_from_values(values: np.ndarray) -> ExtrapolateSummaryResponse:
     )
 
 
+def _coerce_numeric_array(frame: pd.DataFrame, column_name: str) -> np.ndarray:
+    if column_name not in frame.columns:
+        return np.array([], dtype=float)
+    return pd.to_numeric(frame[column_name], errors="coerce").to_numpy(dtype=float)
+
+
 def _json_safe_value(value: object) -> object:
     if isinstance(value, uuid.UUID):
         return str(value)
@@ -208,6 +229,12 @@ def _json_safe_value(value: object) -> object:
     if isinstance(value, list):
         return [_json_safe_value(item) for item in value]
     return value
+
+
+async def _resolve_project_elevation(db: AsyncSession, project_id: uuid.UUID) -> float | None:
+    result = await db.execute(select(Project.elevation).where(Project.id == project_id))
+    value = result.scalar_one_or_none()
+    return float(value) if value is not None else None
 
 
 @router.post("/wind-rose/{dataset_id}", response_model=WindRoseResponse)
@@ -435,6 +462,170 @@ async def create_shear_analysis(
         target_height=payload.target_height,
     )
     return _serialize_shear_response(dataset.id, payload, profile)
+
+
+@router.post("/turbulence/{dataset_id}", response_model=TurbulenceResponse)
+async def create_turbulence_analysis(
+    dataset_id: uuid.UUID,
+    payload: TurbulenceRequest,
+    db: AsyncSession = Depends(get_db),
+) -> TurbulenceResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    speed_column = _resolve_column(dataset.columns, payload.speed_column_id, "speed_column_id")
+    sd_column = _resolve_column(dataset.columns, payload.sd_column_id, "sd_column_id")
+    direction_column = _resolve_column(dataset.columns, payload.direction_column_id, "direction_column_id") if payload.direction_column_id is not None else None
+
+    if speed_column.measurement_type != "speed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="speed_column_id must reference a wind speed column")
+
+    if sd_column.measurement_type not in {"speed_sd", "turbulence_intensity"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="sd_column_id must reference a wind speed standard deviation or turbulence intensity column",
+        )
+
+    column_ids = [speed_column.id, sd_column.id]
+    if direction_column is not None:
+        column_ids.append(direction_column.id)
+
+    frame = await get_clean_dataframe(db, dataset.id, column_ids=column_ids, exclude_flag_ids=payload.exclude_flags)
+    if frame.empty:
+        return TurbulenceResponse(
+            dataset_id=dataset.id,
+            speed_column_id=speed_column.id,
+            sd_column_id=sd_column.id,
+            direction_column_id=direction_column.id if direction_column is not None else None,
+            excluded_flag_ids=payload.exclude_flags,
+            bin_width=payload.bin_width,
+            num_sectors=payload.num_sectors,
+            summary=TurbulenceSummaryResponse(),
+        )
+
+    speed_values = _coerce_numeric_array(frame, speed_column.name)
+    ti_values = _coerce_numeric_array(frame, sd_column.name)
+    if sd_column.measurement_type != "turbulence_intensity":
+        ti_values = calculate_ti(speed_values, ti_values)
+
+    speed_bins = ti_by_speed_bin(speed_values, ti_values, bin_width=payload.bin_width)
+    direction_bins = []
+    if direction_column is not None:
+        direction_values = _coerce_numeric_array(frame, direction_column.name)
+        direction_bins = ti_by_direction(direction_values, ti_values, num_sectors=payload.num_sectors)
+
+    summary = ti_summary(speed_values, ti_values, speed_bins=speed_bins)
+    finite_speed = speed_values[np.isfinite(speed_values) & (speed_values > 0)]
+    if finite_speed.size:
+        min_speed = float(np.min(finite_speed))
+        max_speed = float(np.max(finite_speed))
+    else:
+        min_speed = 1.0
+        max_speed = 25.0
+
+    return TurbulenceResponse(
+        dataset_id=dataset.id,
+        speed_column_id=speed_column.id,
+        sd_column_id=sd_column.id,
+        direction_column_id=direction_column.id if direction_column is not None else None,
+        excluded_flag_ids=payload.exclude_flags,
+        bin_width=payload.bin_width,
+        num_sectors=payload.num_sectors,
+        summary=TurbulenceSummaryResponse(**summary),
+        scatter_points=[TurbulenceScatterPointResponse(**point) for point in build_scatter_points(speed_values, ti_values, max_points=payload.max_scatter_points)],
+        speed_bins=[TurbulenceSpeedBinResponse(**item) for item in speed_bins],
+        direction_bins=[TurbulenceDirectionBinResponse(**item) for item in direction_bins],
+        iec_curves=[
+            TurbulenceIecCurveResponse(
+                label=curve["label"],
+                reference_intensity=float(curve["reference_intensity"]),
+                points=[TurbulenceCurvePointResponse(**point) for point in curve["points"]],
+            )
+            for curve in iec_reference_curves(min_speed, max_speed)
+        ],
+    )
+
+
+@router.post("/air-density/{dataset_id}", response_model=AirDensityResponse)
+async def create_air_density_analysis(
+    dataset_id: uuid.UUID,
+    payload: AirDensityRequest,
+    db: AsyncSession = Depends(get_db),
+) -> AirDensityResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    temperature_column = _resolve_column(dataset.columns, payload.temperature_column_id, "temperature_column_id")
+    speed_column = _resolve_column(dataset.columns, payload.speed_column_id, "speed_column_id")
+    pressure_column = _resolve_column(dataset.columns, payload.pressure_column_id, "pressure_column_id") if payload.pressure_column_id is not None else None
+
+    if temperature_column.measurement_type != "temperature":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="temperature_column_id must reference a temperature column")
+    if speed_column.measurement_type != "speed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="speed_column_id must reference a wind speed column")
+    if pressure_column is not None and pressure_column.measurement_type != "pressure":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pressure_column_id must reference a pressure column")
+
+    project_elevation = await _resolve_project_elevation(db, dataset.project_id)
+    selected_elevation = payload.elevation_m if payload.elevation_m is not None else project_elevation
+
+    if payload.pressure_source == "measured" and pressure_column is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A pressure column is required when pressure_source is measured")
+    if payload.pressure_source == "estimated" and selected_elevation is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Elevation is required when pressure_source is estimated")
+    if payload.pressure_source == "auto" and pressure_column is None and selected_elevation is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide either a pressure column or an elevation to estimate pressure")
+
+    use_estimated_pressure = payload.pressure_source == "estimated" or (payload.pressure_source == "auto" and pressure_column is None)
+    column_ids = [temperature_column.id, speed_column.id]
+    if pressure_column is not None:
+      column_ids.append(pressure_column.id)
+
+    frame = await get_clean_dataframe(db, dataset.id, column_ids=column_ids, exclude_flag_ids=payload.exclude_flags)
+    timestamps = pd.DatetimeIndex(frame.index)
+    if frame.empty:
+        pressure_source = "estimated" if use_estimated_pressure else "measured"
+        estimated_pressure_hpa = estimate_pressure_from_elevation(selected_elevation) if use_estimated_pressure and selected_elevation is not None else None
+        return AirDensityResponse(
+            dataset_id=dataset.id,
+            temperature_column_id=temperature_column.id,
+            speed_column_id=speed_column.id,
+            pressure_column_id=pressure_column.id if pressure_column is not None else None,
+            excluded_flag_ids=payload.exclude_flags,
+            summary=AirDensitySummaryResponse(
+                pressure_source=pressure_source,
+                elevation_m=selected_elevation,
+                estimated_pressure_hpa=estimated_pressure_hpa,
+            ),
+        )
+
+    temperature_values = _coerce_numeric_array(frame, temperature_column.name)
+    speed_values = _coerce_numeric_array(frame, speed_column.name)
+    estimated_pressure_hpa = estimate_pressure_from_elevation(selected_elevation) if use_estimated_pressure and selected_elevation is not None else None
+    if use_estimated_pressure:
+        pressure_values = np.full(temperature_values.shape, estimated_pressure_hpa if estimated_pressure_hpa is not None else np.nan, dtype=float)
+        pressure_source = "estimated"
+    else:
+        pressure_values = _coerce_numeric_array(frame, pressure_column.name if pressure_column is not None else "")
+        pressure_source = "measured"
+
+    density_values = calculate_air_density(temperature_values, pressure_values)
+    wpd_values = wind_power_density(speed_values, density_values)
+    summary = air_density_summary(density_values, wpd_values)
+    monthly_rows = monthly_averages(timestamps, density_values, wpd_values)
+    density_points = build_density_points(timestamps, density_values, wpd_values, max_points=payload.max_series_points)
+
+    return AirDensityResponse(
+        dataset_id=dataset.id,
+        temperature_column_id=temperature_column.id,
+        speed_column_id=speed_column.id,
+        pressure_column_id=pressure_column.id if pressure_column is not None else None,
+        excluded_flag_ids=payload.exclude_flags,
+        summary=AirDensitySummaryResponse(
+            pressure_source=pressure_source,
+            elevation_m=selected_elevation,
+            estimated_pressure_hpa=estimated_pressure_hpa,
+            **summary,
+        ),
+        density_points=[AirDensityPointResponse(**point) for point in density_points],
+        monthly=[AirDensityMonthlyResponse(**row) for row in monthly_rows],
+    )
 
 
 @router.post("/extrapolate/{dataset_id}", response_model=ExtrapolateResponse)

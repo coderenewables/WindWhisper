@@ -163,6 +163,132 @@ export interface ShearResponse {
   time_of_day: ShearTimeOfDayBin[];
 }
 
+export interface TurbulenceRequest {
+  speed_column_id: string;
+  sd_column_id: string;
+  direction_column_id?: string;
+  exclude_flags?: string[];
+  bin_width?: number;
+  num_sectors?: 12 | 16 | 36;
+  max_scatter_points?: number;
+}
+
+export interface TurbulenceScatterPoint {
+  speed: number;
+  ti: number;
+}
+
+export interface TurbulenceCurvePoint {
+  speed: number;
+  ti: number;
+}
+
+export interface TurbulenceIecCurve {
+  label: string;
+  reference_intensity: number;
+  points: TurbulenceCurvePoint[];
+}
+
+export interface TurbulenceSpeedBin {
+  lower: number;
+  upper: number;
+  center: number;
+  sample_count: number;
+  mean_ti: number | null;
+  representative_ti: number | null;
+  p90_ti: number | null;
+  iec_class_a: number;
+  iec_class_b: number;
+  iec_class_c: number;
+}
+
+export interface TurbulenceDirectionBin {
+  sector_index: number;
+  direction: number;
+  start_angle: number;
+  end_angle: number;
+  mean_ti: number | null;
+  representative_ti: number | null;
+  p90_ti: number | null;
+  sample_count: number;
+}
+
+export interface TurbulenceSummary {
+  mean_ti: number | null;
+  median_ti: number | null;
+  p90_ti: number | null;
+  characteristic_ti_15: number | null;
+  iec_class: string | null;
+  sample_count: number;
+  mean_speed: number | null;
+}
+
+export interface TurbulenceResponse {
+  dataset_id: string;
+  speed_column_id: string;
+  sd_column_id: string;
+  direction_column_id: string | null;
+  excluded_flag_ids: string[];
+  bin_width: number;
+  num_sectors: number;
+  summary: TurbulenceSummary;
+  scatter_points: TurbulenceScatterPoint[];
+  speed_bins: TurbulenceSpeedBin[];
+  direction_bins: TurbulenceDirectionBin[];
+  iec_curves: TurbulenceIecCurve[];
+}
+
+export type AirDensityPressureSource = "auto" | "measured" | "estimated";
+
+export interface AirDensityRequest {
+  temperature_column_id: string;
+  speed_column_id: string;
+  pressure_column_id?: string;
+  exclude_flags?: string[];
+  pressure_source?: AirDensityPressureSource;
+  elevation_m?: number;
+  max_series_points?: number;
+}
+
+export interface AirDensityPoint {
+  timestamp: string;
+  density: number | null;
+  wind_power_density: number | null;
+}
+
+export interface AirDensityMonthly {
+  month: number;
+  label: string;
+  mean_density: number | null;
+  mean_wind_power_density: number | null;
+  sample_count: number;
+}
+
+export interface AirDensitySummary {
+  pressure_source: AirDensityPressureSource;
+  elevation_m: number | null;
+  estimated_pressure_hpa: number | null;
+  mean_density: number | null;
+  median_density: number | null;
+  std_density: number | null;
+  min_density: number | null;
+  max_density: number | null;
+  mean_wind_power_density: number | null;
+  annual_wind_power_density: number | null;
+  sample_count: number;
+}
+
+export interface AirDensityResponse {
+  dataset_id: string;
+  temperature_column_id: string;
+  speed_column_id: string;
+  pressure_column_id: string | null;
+  excluded_flag_ids: string[];
+  summary: AirDensitySummary;
+  density_points: AirDensityPoint[];
+  monthly: AirDensityMonthly[];
+}
+
 export interface ExtrapolatedColumn {
   id: string;
   name: string;

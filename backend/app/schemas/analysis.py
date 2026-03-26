@@ -10,8 +10,10 @@ from pydantic import BaseModel, Field
 DEFAULT_SPEED_BIN_EDGES = [0.0, 3.0, 6.0, 9.0, 12.0, 15.0]
 DEFAULT_HISTOGRAM_BIN_COUNT = 30
 DEFAULT_WEIBULL_CURVE_POINTS = 160
+DEFAULT_TURBULENCE_BIN_WIDTH = 1.0
 WeibullMethod = Literal["mle", "moments"]
 ShearMethod = Literal["power", "log"]
+AirDensityPressureSource = Literal["auto", "measured", "estimated"]
 
 
 class WindRoseRequest(BaseModel):
@@ -179,6 +181,130 @@ class ShearResponse(BaseModel):
     profile_points: list[ShearProfilePointResponse] = Field(default_factory=list)
     direction_bins: list[ShearDirectionBinResponse] = Field(default_factory=list)
     time_of_day: list[ShearTimeOfDayResponse] = Field(default_factory=list)
+
+
+class TurbulenceRequest(BaseModel):
+    speed_column_id: uuid.UUID
+    sd_column_id: uuid.UUID
+    direction_column_id: uuid.UUID | None = None
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    bin_width: float = Field(default=DEFAULT_TURBULENCE_BIN_WIDTH, gt=0, le=10)
+    num_sectors: Literal[12, 16, 36] = 12
+    max_scatter_points: Annotated[int, Field(default=4000, ge=200, le=10000)] = 4000
+
+
+class TurbulenceScatterPointResponse(BaseModel):
+    speed: float
+    ti: float
+
+
+class TurbulenceCurvePointResponse(BaseModel):
+    speed: float
+    ti: float
+
+
+class TurbulenceIecCurveResponse(BaseModel):
+    label: str
+    reference_intensity: float
+    points: list[TurbulenceCurvePointResponse] = Field(default_factory=list)
+
+
+class TurbulenceSpeedBinResponse(BaseModel):
+    lower: float
+    upper: float
+    center: float
+    sample_count: int = 0
+    mean_ti: float | None = None
+    representative_ti: float | None = None
+    p90_ti: float | None = None
+    iec_class_a: float
+    iec_class_b: float
+    iec_class_c: float
+
+
+class TurbulenceDirectionBinResponse(BaseModel):
+    sector_index: int
+    direction: float
+    start_angle: float
+    end_angle: float
+    mean_ti: float | None = None
+    representative_ti: float | None = None
+    p90_ti: float | None = None
+    sample_count: int = 0
+
+
+class TurbulenceSummaryResponse(BaseModel):
+    mean_ti: float | None = None
+    median_ti: float | None = None
+    p90_ti: float | None = None
+    characteristic_ti_15: float | None = None
+    iec_class: str | None = None
+    sample_count: int = 0
+    mean_speed: float | None = None
+
+
+class TurbulenceResponse(BaseModel):
+    dataset_id: uuid.UUID
+    speed_column_id: uuid.UUID
+    sd_column_id: uuid.UUID
+    direction_column_id: uuid.UUID | None = None
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    bin_width: float
+    num_sectors: int
+    summary: TurbulenceSummaryResponse
+    scatter_points: list[TurbulenceScatterPointResponse] = Field(default_factory=list)
+    speed_bins: list[TurbulenceSpeedBinResponse] = Field(default_factory=list)
+    direction_bins: list[TurbulenceDirectionBinResponse] = Field(default_factory=list)
+    iec_curves: list[TurbulenceIecCurveResponse] = Field(default_factory=list)
+
+
+class AirDensityRequest(BaseModel):
+    temperature_column_id: uuid.UUID
+    speed_column_id: uuid.UUID
+    pressure_column_id: uuid.UUID | None = None
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    pressure_source: AirDensityPressureSource = "auto"
+    elevation_m: float | None = None
+    max_series_points: Annotated[int, Field(default=240, ge=24, le=1000)] = 240
+
+
+class AirDensityPointResponse(BaseModel):
+    timestamp: datetime
+    density: float | None = None
+    wind_power_density: float | None = None
+
+
+class AirDensityMonthlyResponse(BaseModel):
+    month: int
+    label: str
+    mean_density: float | None = None
+    mean_wind_power_density: float | None = None
+    sample_count: int = 0
+
+
+class AirDensitySummaryResponse(BaseModel):
+    pressure_source: AirDensityPressureSource
+    elevation_m: float | None = None
+    estimated_pressure_hpa: float | None = None
+    mean_density: float | None = None
+    median_density: float | None = None
+    std_density: float | None = None
+    min_density: float | None = None
+    max_density: float | None = None
+    mean_wind_power_density: float | None = None
+    annual_wind_power_density: float | None = None
+    sample_count: int = 0
+
+
+class AirDensityResponse(BaseModel):
+    dataset_id: uuid.UUID
+    temperature_column_id: uuid.UUID
+    speed_column_id: uuid.UUID
+    pressure_column_id: uuid.UUID | None = None
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    summary: AirDensitySummaryResponse
+    density_points: list[AirDensityPointResponse] = Field(default_factory=list)
+    monthly: list[AirDensityMonthlyResponse] = Field(default_factory=list)
 
 
 class ExtrapolateRequest(BaseModel):

@@ -2,15 +2,17 @@ import { AlertTriangle, BarChart3, Compass, GaugeCircle, ShieldCheck, Wind } fro
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { createExtrapolatedChannel, getHistogramAnalysis, getShearAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
+import { createExtrapolatedChannel, getAirDensityAnalysis, getHistogramAnalysis, getShearAnalysis, getTurbulenceAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
+import { AirDensityPanel } from "../components/analysis/AirDensityPanel";
 import { FrequencyHistogram } from "../components/analysis/FrequencyHistogram";
+import { TurbulencePanel } from "../components/analysis/TurbulencePanel";
 import { WindShearPanel } from "../components/analysis/WindShearPanel";
 import { getDataset, listProjectDatasets } from "../api/datasets";
 import { listFlags } from "../api/qc";
 import { WindRoseChart } from "../components/analysis/WindRoseChart";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { useProjectStore } from "../stores/projectStore";
-import type { HistogramRequest, HistogramResponse, ShearMethod, ShearResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
+import type { AirDensityPressureSource, AirDensityResponse, HistogramRequest, HistogramResponse, ShearMethod, ShearResponse, TurbulenceResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
 import type { DatasetColumn, DatasetDetail, DatasetSummary } from "../types/dataset";
 import type { Flag } from "../types/qc";
 
@@ -20,8 +22,8 @@ const analysisTabs: Array<{ id: AnalysisTab; label: string; description: string 
   { id: "wind-rose", label: "Wind Rose", description: "Directional frequency, mean speed, and energy." },
   { id: "histogram", label: "Histogram", description: "Frequency distributions for any measured channel, with Weibull overlays for wind speed." },
   { id: "shear", label: "Shear", description: "Vertical profile, directional shear, and target-height extrapolation." },
-  { id: "turbulence", label: "Turbulence", description: "IEC TI analytics will follow in the next analysis tasks." },
-  { id: "air-density", label: "Air Density", description: "Density and wind power density calculations will be added later." },
+  { id: "turbulence", label: "Turbulence", description: "IEC turbulence intensity analysis by speed bin and direction." },
+  { id: "air-density", label: "Air Density", description: "Density and wind power density from measured or estimated pressure." },
   { id: "extreme-wind", label: "Extreme Wind", description: "Return-period and Gumbel analysis is queued after core charts." },
 ];
 
@@ -70,6 +72,8 @@ export function AnalysisPage() {
   const [roseData, setRoseData] = useState<WindRoseResponse | null>(null);
   const [histogramData, setHistogramData] = useState<HistogramResponse | null>(null);
   const [shearData, setShearData] = useState<ShearResponse | null>(null);
+  const [turbulenceData, setTurbulenceData] = useState<TurbulenceResponse | null>(null);
+  const [airDensityData, setAirDensityData] = useState<AirDensityResponse | null>(null);
   const [weibullData, setWeibullData] = useState<WeibullResponse | null>(null);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
   const [isLoadingDatasetDetail, setIsLoadingDatasetDetail] = useState(false);
@@ -77,12 +81,16 @@ export function AnalysisPage() {
   const [isLoadingWindRose, setIsLoadingWindRose] = useState(false);
   const [isLoadingHistogram, setIsLoadingHistogram] = useState(false);
   const [isLoadingShear, setIsLoadingShear] = useState(false);
+  const [isLoadingTurbulence, setIsLoadingTurbulence] = useState(false);
+  const [isLoadingAirDensity, setIsLoadingAirDensity] = useState(false);
   const [isLoadingWeibull, setIsLoadingWeibull] = useState(false);
   const [isCreatingExtrapolatedChannel, setIsCreatingExtrapolatedChannel] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [windRoseError, setWindRoseError] = useState<string | null>(null);
   const [histogramError, setHistogramError] = useState<string | null>(null);
   const [shearError, setShearError] = useState<string | null>(null);
+  const [turbulenceError, setTurbulenceError] = useState<string | null>(null);
+  const [airDensityError, setAirDensityError] = useState<string | null>(null);
   const [weibullError, setWeibullError] = useState<string | null>(null);
   const [createChannelError, setCreateChannelError] = useState<string | null>(null);
   const [createdChannelName, setCreatedChannelName] = useState<string | null>(null);
@@ -91,7 +99,17 @@ export function AnalysisPage() {
   const [shearMethod, setShearMethod] = useState<ShearMethod>("power");
   const [shearTargetHeight, setShearTargetHeight] = useState("100");
   const [selectedShearDirectionColumnId, setSelectedShearDirectionColumnId] = useState("");
+  const [selectedTurbulenceSpeedColumnId, setSelectedTurbulenceSpeedColumnId] = useState("");
+  const [selectedTurbulenceSdColumnId, setSelectedTurbulenceSdColumnId] = useState("");
+  const [selectedTurbulenceDirectionColumnId, setSelectedTurbulenceDirectionColumnId] = useState("");
+  const [turbulenceBinWidth, setTurbulenceBinWidth] = useState("1");
+  const [selectedAirTemperatureColumnId, setSelectedAirTemperatureColumnId] = useState("");
+  const [selectedAirPressureColumnId, setSelectedAirPressureColumnId] = useState("");
+  const [selectedAirSpeedColumnId, setSelectedAirSpeedColumnId] = useState("");
+  const [airPressureSource, setAirPressureSource] = useState<AirDensityPressureSource>("auto");
+  const [airElevation, setAirElevation] = useState("");
   const { projects, fetchProjects } = useProjectStore();
+  const activeProject = projects.find((project) => project.id === projectId) ?? null;
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -145,9 +163,18 @@ export function AnalysisPage() {
       setSelectedValueColumnId("");
       setSelectedHistogramColumnId("");
       setSelectedShearDirectionColumnId("");
+      setSelectedTurbulenceSpeedColumnId("");
+      setSelectedTurbulenceSdColumnId("");
+      setSelectedTurbulenceDirectionColumnId("");
+      setSelectedAirTemperatureColumnId("");
+      setSelectedAirPressureColumnId("");
+      setSelectedAirSpeedColumnId("");
+      setAirElevation("");
       setRoseData(null);
       setHistogramData(null);
       setShearData(null);
+      setTurbulenceData(null);
+      setAirDensityData(null);
       setWeibullData(null);
       return;
     }
@@ -167,6 +194,17 @@ export function AnalysisPage() {
         setSelectedValueColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultValueColumn(response.columns)));
         setSelectedHistogramColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultValueColumn(response.columns)));
         setSelectedShearDirectionColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultDirectionColumn(response.columns)));
+        setSelectedTurbulenceSpeedColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "speed")?.id ?? ""));
+        setSelectedTurbulenceSdColumnId(
+          (current) =>
+            (isValidColumn(response.columns, current)
+              ? current
+              : response.columns.find((column) => column.measurement_type === "speed_sd" || column.measurement_type === "turbulence_intensity")?.id) ?? "",
+        );
+        setSelectedTurbulenceDirectionColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultDirectionColumn(response.columns)));
+        setSelectedAirTemperatureColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "temperature")?.id ?? ""));
+        setSelectedAirPressureColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "pressure")?.id ?? ""));
+        setSelectedAirSpeedColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "speed")?.id ?? ""));
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -186,6 +224,22 @@ export function AnalysisPage() {
       datasetDetail?.columns.filter(
         (column) => column.measurement_type === "speed" && column.height_m != null && column.sensor_info?.derived !== true,
       ) ?? [],
+    [datasetDetail],
+  );
+  const turbulenceSpeedColumns = useMemo(
+    () => datasetDetail?.columns.filter((column) => column.measurement_type === "speed") ?? [],
+    [datasetDetail],
+  );
+  const turbulenceSdColumns = useMemo(
+    () => datasetDetail?.columns.filter((column) => column.measurement_type === "speed_sd" || column.measurement_type === "turbulence_intensity") ?? [],
+    [datasetDetail],
+  );
+  const temperatureColumns = useMemo(
+    () => datasetDetail?.columns.filter((column) => column.measurement_type === "temperature") ?? [],
+    [datasetDetail],
+  );
+  const pressureColumns = useMemo(
+    () => datasetDetail?.columns.filter((column) => column.measurement_type === "pressure") ?? [],
     [datasetDetail],
   );
   const selectedHistogramColumn = useMemo(
@@ -214,6 +268,18 @@ export function AnalysisPage() {
     const parsed = Number(shearTargetHeight);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
   }, [shearTargetHeight]);
+  const parsedTurbulenceBinWidth = useMemo(() => {
+    const parsed = Number(turbulenceBinWidth);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+  }, [turbulenceBinWidth]);
+  const parsedAirElevation = useMemo(() => {
+    const source = airElevation.trim();
+    if (!source) {
+      return activeProject?.elevation ?? null;
+    }
+    const parsed = Number(source);
+    return Number.isFinite(parsed) ? parsed : activeProject?.elevation ?? null;
+  }, [activeProject?.elevation, airElevation]);
 
   useEffect(() => {
     if (isWeibullAvailable) {
@@ -332,6 +398,80 @@ export function AnalysisPage() {
   }, [activeTab, datasetId, excludedFlagIds, numSectors, parsedShearTargetHeight, selectedShearDirectionColumnId, shearMethod, shearSpeedColumns]);
 
   useEffect(() => {
+    if (activeTab !== "turbulence" || !datasetId || !selectedTurbulenceSpeedColumnId || !selectedTurbulenceSdColumnId) {
+      setTurbulenceError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingTurbulence(true);
+    setTurbulenceError(null);
+
+    void getTurbulenceAnalysis(datasetId, {
+      speed_column_id: selectedTurbulenceSpeedColumnId,
+      sd_column_id: selectedTurbulenceSdColumnId,
+      direction_column_id: selectedTurbulenceDirectionColumnId || undefined,
+      exclude_flags: excludedFlagIds,
+      bin_width: parsedTurbulenceBinWidth,
+      num_sectors: numSectors,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setTurbulenceData(response);
+          setIsLoadingTurbulence(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setTurbulenceData(null);
+          setTurbulenceError(error instanceof Error ? error.message : "Unable to calculate turbulence intensity");
+          setIsLoadingTurbulence(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetId, excludedFlagIds, numSectors, parsedTurbulenceBinWidth, selectedTurbulenceDirectionColumnId, selectedTurbulenceSdColumnId, selectedTurbulenceSpeedColumnId]);
+
+  useEffect(() => {
+    if (activeTab !== "air-density" || !datasetId || !selectedAirTemperatureColumnId || !selectedAirSpeedColumnId) {
+      setAirDensityError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingAirDensity(true);
+    setAirDensityError(null);
+
+    void getAirDensityAnalysis(datasetId, {
+      temperature_column_id: selectedAirTemperatureColumnId,
+      speed_column_id: selectedAirSpeedColumnId,
+      pressure_column_id: selectedAirPressureColumnId || undefined,
+      pressure_source: airPressureSource,
+      elevation_m: parsedAirElevation ?? undefined,
+      exclude_flags: excludedFlagIds,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setAirDensityData(response);
+          setIsLoadingAirDensity(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setAirDensityData(null);
+          setAirDensityError(error instanceof Error ? error.message : "Unable to calculate air density");
+          setIsLoadingAirDensity(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, airPressureSource, datasetId, excludedFlagIds, parsedAirElevation, selectedAirPressureColumnId, selectedAirSpeedColumnId, selectedAirTemperatureColumnId]);
+
+  useEffect(() => {
     if (activeTab !== "histogram" || !datasetId || !histogramRequest) {
       setHistogramError(null);
       return;
@@ -398,7 +538,6 @@ export function AnalysisPage() {
     };
   }, [activeTab, datasetId, histogramRequest, isWeibullAvailable, showWeibullFit, weibullMethod]);
 
-  const activeProject = projects.find((project) => project.id === projectId) ?? null;
   const directionColumns = useMemo(() => datasetDetail?.columns.filter((column) => column.measurement_type === "direction") ?? [], [datasetDetail]);
   const valueColumns = useMemo(
     () => datasetDetail?.columns.filter((column) => column.measurement_type !== "direction") ?? [],
@@ -475,12 +614,12 @@ export function AnalysisPage() {
       <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.95fr)] xl:items-end">
           <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Tasks 14-16</span>
+            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Tasks 14-19</span>
             <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Explore directional behaviour, live distributions, and Weibull fits inside a QC-aware analysis workspace.
+              Explore directional behaviour, distributions, shear, turbulence, and air density inside a QC-aware analysis workspace.
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
-              Choose a dataset, then move between wind roses and histograms without leaving the same cleaned-data context or reselecting your QC filters.
+              Choose a dataset, then move between wind roses, distributions, shear, IEC turbulence, and density views without leaving the same cleaned-data context.
             </p>
           </div>
 
@@ -816,6 +955,186 @@ export function AnalysisPage() {
                     createChannelError={createChannelError}
                     createdChannelName={createdChannelName}
                   />
+                )}
+              </div>
+            </section>
+          ) : activeTab === "turbulence" ? (
+            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="space-y-4">
+                <section className="panel-surface p-5">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
+                  <div className="mt-4 space-y-4">
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Speed column
+                      <select value={selectedTurbulenceSpeedColumnId} onChange={(event) => setSelectedTurbulenceSpeedColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={turbulenceSpeedColumns.length === 0}>
+                        <option value="">Select a speed column</option>
+                        {turbulenceSpeedColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Speed SD / TI column
+                      <select value={selectedTurbulenceSdColumnId} onChange={(event) => setSelectedTurbulenceSdColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={turbulenceSdColumns.length === 0}>
+                        <option value="">Select a TI input column</option>
+                        {turbulenceSdColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Direction column
+                      <select value={selectedTurbulenceDirectionColumnId} onChange={(event) => setSelectedTurbulenceDirectionColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={directionColumns.length === 0}>
+                        <option value="">No direction grouping</option>
+                        {directionColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      TI speed-bin width (m/s)
+                      <input type="number" min="0.1" step="0.1" value={turbulenceBinWidth} onChange={(event) => setTurbulenceBinWidth(event.target.value)} className="rounded-2xl border-ink-200 bg-white" />
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Direction sectors
+                      <select value={numSectors} onChange={(event) => setNumSectors(Number(event.target.value) as 12 | 16 | 36)} className="rounded-2xl border-ink-200 bg-white">
+                        <option value={12}>12 sectors</option>
+                        <option value={16}>16 sectors</option>
+                        <option value={36}>36 sectors</option>
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="panel-surface p-5">
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
+                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
+                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
+                  {!isLoadingFlags && flags.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {flags.map((flag) => {
+                        const excluded = excludedFlagIds.includes(flag.id);
+                        return (
+                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
+                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
+                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
+                            <span className="flex-1 text-sm text-ink-700">
+                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
+                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
+              </aside>
+
+              <div className="space-y-4">
+                {!selectedTurbulenceSpeedColumnId || !selectedTurbulenceSdColumnId ? (
+                  <section className="panel-surface p-8 text-sm text-ink-600">Select a wind speed column and a speed standard deviation column to run turbulence intensity analysis.</section>
+                ) : (
+                  <TurbulencePanel data={turbulenceData} isLoading={isLoadingTurbulence} error={turbulenceError} />
+                )}
+              </div>
+            </section>
+          ) : activeTab === "air-density" ? (
+            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="space-y-4">
+                <section className="panel-surface p-5">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
+                  <div className="mt-4 space-y-4">
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Temperature column
+                      <select value={selectedAirTemperatureColumnId} onChange={(event) => setSelectedAirTemperatureColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={temperatureColumns.length === 0}>
+                        <option value="">Select a temperature column</option>
+                        {temperatureColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Wind-speed column
+                      <select value={selectedAirSpeedColumnId} onChange={(event) => setSelectedAirSpeedColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={turbulenceSpeedColumns.length === 0}>
+                        <option value="">Select a speed column</option>
+                        {turbulenceSpeedColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Pressure source
+                      <select value={airPressureSource} onChange={(event) => setAirPressureSource(event.target.value as AirDensityPressureSource)} className="rounded-2xl border-ink-200 bg-white">
+                        <option value="auto">Auto</option>
+                        <option value="measured">Measured pressure</option>
+                        <option value="estimated">Estimate from elevation</option>
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Pressure column
+                      <select value={selectedAirPressureColumnId} onChange={(event) => setSelectedAirPressureColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={pressureColumns.length === 0 || airPressureSource === "estimated"}>
+                        <option value="">No pressure column</option>
+                        {pressureColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Elevation (m)
+                      <input type="number" step="1" value={airElevation} onChange={(event) => setAirElevation(event.target.value)} placeholder={activeProject?.elevation != null ? String(activeProject.elevation) : "Project elevation"} className="rounded-2xl border-ink-200 bg-white" />
+                    </label>
+                  </div>
+                </section>
+
+                <section className="panel-surface p-5">
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
+                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
+                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
+                  {!isLoadingFlags && flags.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {flags.map((flag) => {
+                        const excluded = excludedFlagIds.includes(flag.id);
+                        return (
+                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
+                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
+                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
+                            <span className="flex-1 text-sm text-ink-700">
+                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
+                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
+              </aside>
+
+              <div className="space-y-4">
+                {!selectedAirTemperatureColumnId || !selectedAirSpeedColumnId ? (
+                  <section className="panel-surface p-8 text-sm text-ink-600">Select temperature and wind-speed inputs to calculate air density and wind power density.</section>
+                ) : (
+                  <AirDensityPanel data={airDensityData} isLoading={isLoadingAirDensity} error={airDensityError} />
                 )}
               </div>
             </section>

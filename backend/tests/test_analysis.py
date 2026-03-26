@@ -287,3 +287,194 @@ async def test_shear_and_extrapolation_endpoints_return_profiles_and_create_colu
     )
     rows = result.scalars().all()
     assert all("Speed_100m_power" in row.values_json for row in rows)
+
+
+async def test_turbulence_endpoint_returns_speed_bins_direction_bins_and_summary(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="TI Site")
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 6, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="TI Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=50),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    direction_column = DataColumn(dataset_id=dataset.id, name="Dir_80m", measurement_type="direction", height_m=80)
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    speed_sd_column = DataColumn(dataset_id=dataset.id, name="Speed_SD_80m", measurement_type="speed_sd", height_m=80)
+    db_session.add_all([direction_column, speed_column, speed_sd_column])
+    await db_session.flush()
+
+    speeds = [12.0, 14.0, 15.0, 15.5, 16.0, 17.0]
+    speed_sd = [1.5, 2.1, 2.8, 3.0, 3.1, 3.2]
+    directions = [0.0, 30.0, 60.0, 120.0, 180.0, 240.0]
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(minutes=index * 10),
+                values_json={
+                    "Dir_80m": directions[index],
+                    "Speed_80m": speeds[index],
+                    "Speed_SD_80m": speed_sd[index],
+                },
+            )
+            for index in range(len(speeds))
+        ],
+    )
+
+    flag = Flag(dataset_id=dataset.id, name="Exclude final step", color="#ef4444")
+    db_session.add(flag)
+    await db_session.flush()
+    db_session.add(
+        FlaggedRange(
+            flag_id=flag.id,
+            start_time=start_time + timedelta(minutes=50),
+            end_time=start_time + timedelta(minutes=50),
+            applied_by="manual",
+            column_ids=[speed_column.id, speed_sd_column.id, direction_column.id],
+        ),
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/turbulence/{dataset.id}",
+        json={
+            "speed_column_id": str(speed_column.id),
+            "sd_column_id": str(speed_sd_column.id),
+            "direction_column_id": str(direction_column.id),
+            "exclude_flags": [str(flag.id)],
+            "bin_width": 1.0,
+            "num_sectors": 12,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["speed_column_id"] == str(speed_column.id)
+    assert payload["sd_column_id"] == str(speed_sd_column.id)
+    assert payload["direction_column_id"] == str(direction_column.id)
+    assert payload["summary"]["sample_count"] == 5
+    assert payload["summary"]["mean_ti"] > 0.14
+    assert payload["summary"]["characteristic_ti_15"] is not None
+    assert payload["summary"]["iec_class"] in {"IEC Class B", "IEC Class A", "Above IEC Class A"}
+    assert len(payload["scatter_points"]) == 5
+    assert len(payload["speed_bins"]) >= 4
+    assert len(payload["direction_bins"]) == 12
+    assert len(payload["iec_curves"]) == 3
+
+
+async def test_air_density_endpoint_uses_measured_pressure_and_returns_monthly_summary(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="Density Site", elevation=145)
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 7, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Density Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=30),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    temperature_column = DataColumn(dataset_id=dataset.id, name="Temp_2m", measurement_type="temperature", height_m=2)
+    pressure_column = DataColumn(dataset_id=dataset.id, name="Press_hPa", measurement_type="pressure", height_m=2)
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add_all([temperature_column, pressure_column, speed_column])
+    await db_session.flush()
+
+    rows = [
+        {"Temp_2m": 12.0, "Press_hPa": 1013.0, "Speed_80m": 7.0},
+        {"Temp_2m": 13.0, "Press_hPa": 1011.5, "Speed_80m": 7.5},
+        {"Temp_2m": 14.0, "Press_hPa": 1012.2, "Speed_80m": 8.0},
+        {"Temp_2m": 15.0, "Press_hPa": 1010.8, "Speed_80m": 8.5},
+    ]
+    db_session.add_all(
+        [
+            TimeseriesData(dataset_id=dataset.id, timestamp=start_time + timedelta(minutes=index * 10), values_json=row)
+            for index, row in enumerate(rows)
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/air-density/{dataset.id}",
+        json={
+            "temperature_column_id": str(temperature_column.id),
+            "pressure_column_id": str(pressure_column.id),
+            "speed_column_id": str(speed_column.id),
+            "pressure_source": "measured",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["pressure_source"] == "measured"
+    assert payload["summary"]["mean_density"] > 1.2
+    assert payload["summary"]["mean_wind_power_density"] > 200
+    assert payload["summary"]["sample_count"] == 4
+    assert len(payload["density_points"]) == 4
+    assert len(payload["monthly"]) == 1
+    assert payload["monthly"][0]["label"] == "Jul"
+
+
+async def test_air_density_endpoint_can_estimate_pressure_from_project_elevation(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="Estimated Pressure Site", elevation=450)
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 8, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Density Mast Estimated",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=20),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    temperature_column = DataColumn(dataset_id=dataset.id, name="Temp_2m", measurement_type="temperature", height_m=2)
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add_all([temperature_column, speed_column])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(minutes=index * 10),
+                values_json={"Temp_2m": 10 + index, "Speed_80m": 6.5 + index * 0.4},
+            )
+            for index in range(3)
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/air-density/{dataset.id}",
+        json={
+            "temperature_column_id": str(temperature_column.id),
+            "speed_column_id": str(speed_column.id),
+            "pressure_source": "estimated",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["pressure_source"] == "estimated"
+    assert payload["summary"]["estimated_pressure_hpa"] is not None
+    assert payload["summary"]["elevation_m"] == 450
+    assert payload["summary"]["mean_density"] is not None

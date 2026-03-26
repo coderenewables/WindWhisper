@@ -1,11 +1,15 @@
 import { apiClient } from "./client";
 import type {
+  AirDensityRequest,
+  AirDensityResponse,
   ExtrapolateRequest,
   ExtrapolateResponse,
   HistogramRequest,
   HistogramResponse,
   ShearRequest,
   ShearResponse,
+  TurbulenceRequest,
+  TurbulenceResponse,
   WeibullRequest,
   WeibullResponse,
   WindRoseRequest,
@@ -29,6 +33,16 @@ export async function getWeibullAnalysis(datasetId: string, payload: WeibullRequ
 
 export async function getShearAnalysis(datasetId: string, payload: ShearRequest): Promise<ShearResponse> {
   const response = await apiClient.post<ShearResponse>(`/analysis/shear/${datasetId}`, payload);
+  return response.data;
+}
+
+export async function getTurbulenceAnalysis(datasetId: string, payload: TurbulenceRequest): Promise<TurbulenceResponse> {
+  const response = await apiClient.post<TurbulenceResponse>(`/analysis/turbulence/${datasetId}`, payload);
+  return response.data;
+}
+
+export async function getAirDensityAnalysis(datasetId: string, payload: AirDensityRequest): Promise<AirDensityResponse> {
+  const response = await apiClient.post<AirDensityResponse>(`/analysis/air-density/${datasetId}`, payload);
   return response.data;
 }
 

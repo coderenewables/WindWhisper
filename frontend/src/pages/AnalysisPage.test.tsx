@@ -12,6 +12,8 @@ const analysisMocks = vi.hoisted(() => ({
   getWindRoseAnalysis: vi.fn(),
   getHistogramAnalysis: vi.fn(),
   getShearAnalysis: vi.fn(),
+  getTurbulenceAnalysis: vi.fn(),
+  getAirDensityAnalysis: vi.fn(),
   createExtrapolatedChannel: vi.fn(),
   getWeibullAnalysis: vi.fn(),
 }));
@@ -30,6 +32,8 @@ vi.mock("../api/analysis", () => ({
   getWindRoseAnalysis: analysisMocks.getWindRoseAnalysis,
   getHistogramAnalysis: analysisMocks.getHistogramAnalysis,
   getShearAnalysis: analysisMocks.getShearAnalysis,
+  getTurbulenceAnalysis: analysisMocks.getTurbulenceAnalysis,
+  getAirDensityAnalysis: analysisMocks.getAirDensityAnalysis,
   getWeibullAnalysis: analysisMocks.getWeibullAnalysis,
 }));
 
@@ -62,12 +66,14 @@ const datasetDetail = {
   end_time: "2025-01-02T00:00:00Z",
   created_at: "2025-01-02T00:00:00Z",
   row_count: 144,
-  column_count: 4,
+  column_count: 6,
   columns: [
     { id: "dir-1", name: "Dir 80m", measurement_type: "direction", unit: "deg", height_m: 80, sensor_info: null },
     { id: "spd-1", name: "Speed 80m", measurement_type: "speed", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "spd-2", name: "Speed 60m", measurement_type: "speed", unit: "m/s", height_m: 60, sensor_info: null },
+    { id: "sd-1", name: "Speed SD 80m", measurement_type: "speed_sd", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "tmp-1", name: "Temp 2m", measurement_type: "temperature", unit: "C", height_m: 2, sensor_info: null },
+    { id: "prs-1", name: "Pressure hPa", measurement_type: "pressure", unit: "hPa", height_m: 2, sensor_info: null },
   ],
 };
 
@@ -139,6 +145,57 @@ beforeEach(() => {
     ],
     direction_bins: Array.from({ length: 12 }, (_, index) => ({ sector_index: index, direction: index * 30, start_angle: index * 30, end_angle: index * 30 + 30, mean_value: 0.2, median_value: 0.2, std_value: 0, count: 2 })),
     time_of_day: Array.from({ length: 24 }, (_, hour) => ({ hour, mean_value: hour < 2 ? 0.2 : null, median_value: hour < 2 ? 0.2 : null, std_value: hour < 2 ? 0 : null, count: hour < 2 ? 1 : 0 })),
+  });
+  analysisMocks.getTurbulenceAnalysis.mockResolvedValue({
+    dataset_id: "dataset-1",
+    speed_column_id: "spd-1",
+    sd_column_id: "sd-1",
+    direction_column_id: "dir-1",
+    excluded_flag_ids: [],
+    bin_width: 1,
+    num_sectors: 12,
+    summary: { mean_ti: 0.12, median_ti: 0.11, p90_ti: 0.16, characteristic_ti_15: 0.18, iec_class: "Above IEC Class A", sample_count: 24, mean_speed: 7.4 },
+    scatter_points: [
+      { speed: 6, ti: 0.1 },
+      { speed: 8, ti: 0.11 },
+    ],
+    speed_bins: [
+      { lower: 5, upper: 6, center: 5.5, sample_count: 4, mean_ti: 0.1, representative_ti: 0.12, p90_ti: 0.13, iec_class_a: 0.30, iec_class_b: 0.27, iec_class_c: 0.23 },
+      { lower: 6, upper: 7, center: 6.5, sample_count: 4, mean_ti: 0.11, representative_ti: 0.13, p90_ti: 0.14, iec_class_a: 0.26, iec_class_b: 0.22, iec_class_c: 0.20 },
+    ],
+    direction_bins: Array.from({ length: 12 }, (_, index) => ({ sector_index: index, direction: index * 30, start_angle: index * 30, end_angle: index * 30 + 30, mean_ti: 0.1, representative_ti: 0.12, p90_ti: 0.13, sample_count: 2 })),
+    iec_curves: [
+      { label: "IEC Class A", reference_intensity: 0.16, points: [{ speed: 5, ti: 0.3 }, { speed: 15, ti: 0.18 }] },
+      { label: "IEC Class B", reference_intensity: 0.14, points: [{ speed: 5, ti: 0.26 }, { speed: 15, ti: 0.16 }] },
+      { label: "IEC Class C", reference_intensity: 0.12, points: [{ speed: 5, ti: 0.22 }, { speed: 15, ti: 0.14 }] },
+    ],
+  });
+  analysisMocks.getAirDensityAnalysis.mockResolvedValue({
+    dataset_id: "dataset-1",
+    temperature_column_id: "tmp-1",
+    speed_column_id: "spd-1",
+    pressure_column_id: "prs-1",
+    excluded_flag_ids: [],
+    summary: {
+      pressure_source: "measured",
+      elevation_m: 110,
+      estimated_pressure_hpa: null,
+      mean_density: 1.224,
+      median_density: 1.223,
+      std_density: 0.01,
+      min_density: 1.21,
+      max_density: 1.24,
+      mean_wind_power_density: 342,
+      annual_wind_power_density: 342,
+      sample_count: 24,
+    },
+    density_points: [
+      { timestamp: "2025-01-01T00:00:00Z", density: 1.22, wind_power_density: 320 },
+      { timestamp: "2025-01-01T01:00:00Z", density: 1.23, wind_power_density: 345 },
+    ],
+    monthly: [
+      { month: 1, label: "Jan", mean_density: 1.224, mean_wind_power_density: 342, sample_count: 24 },
+    ],
   });
   analysisMocks.createExtrapolatedChannel.mockResolvedValue({
     dataset_id: "dataset-1",
@@ -242,4 +299,49 @@ test("requests shear analysis and can create an extrapolated channel", async () 
   });
 
   await screen.findByText(/created derived channel: speed_100m_power/i);
+});
+
+test("requests turbulence analysis when the turbulence tab is opened", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/wind rose chart stub/i);
+  await user.click(screen.getByRole("button", { name: /turbulence/i }));
+
+  await waitFor(() => {
+    expect(analysisMocks.getTurbulenceAnalysis).toHaveBeenCalledWith("dataset-1", {
+      speed_column_id: "spd-1",
+      sd_column_id: "sd-1",
+      direction_column_id: "dir-1",
+      exclude_flags: [],
+      bin_width: 1,
+      num_sectors: 12,
+    });
+  });
+
+  await screen.findByText(/iec turbulence intensity diagnostics/i);
+  await screen.findByText(/above iec class a/i);
+});
+
+test("requests air density analysis when the air density tab is opened", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/wind rose chart stub/i);
+  await user.click(screen.getByRole("button", { name: /air density/i }));
+
+  await waitFor(() => {
+    expect(analysisMocks.getAirDensityAnalysis).toHaveBeenCalledWith("dataset-1", {
+      temperature_column_id: "tmp-1",
+      speed_column_id: "spd-1",
+      pressure_column_id: "prs-1",
+      pressure_source: "auto",
+      elevation_m: undefined,
+      exclude_flags: [],
+    });
+  });
+
+  await screen.findByText(/density and wind power density/i);
+  await screen.findByText(/^1.224 kg\/m³$/i, { selector: "div" });
+  await screen.findByText(/^342 w\/m²$/i, { selector: "div" });
 });
