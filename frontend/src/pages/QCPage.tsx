@@ -21,6 +21,7 @@ import { Modal } from "../components/common/Modal";
 import { FlagManager } from "../components/qc/FlagManager";
 import { FlagRuleEditor } from "../components/qc/FlagRuleEditor";
 import { QCDashboard } from "../components/qc/QCDashboard";
+import { TowerShadowDetector } from "../components/qc/TowerShadowDetector";
 import { ChannelSelector } from "../components/timeseries/ChannelSelector";
 import { TimeSeriesChart } from "../components/timeseries/TimeSeriesChart";
 import { TimeSeriesControls } from "../components/timeseries/TimeSeriesControls";
@@ -226,6 +227,7 @@ export function QCPage() {
     resample: resample === "raw" ? null : resample,
     fullStart: datasetDetail?.start_time ?? null,
     fullEnd: datasetDetail?.end_time ?? null,
+    excludedFlagIds: [],
   });
 
   function updateSearch(next: { projectId?: string; datasetId?: string }) {
@@ -328,6 +330,13 @@ export function QCPage() {
           <QCDashboard
             sidebar={
               <>
+                <TowerShadowDetector
+                  datasetId={datasetDetail.id}
+                  columns={datasetDetail.columns}
+                  onApplied={async (flagId) => {
+                    await refreshQcState(datasetDetail.id, flagId);
+                  }}
+                />
                 <FlagManager
                   flags={flags}
                   flaggedRanges={flaggedRanges}

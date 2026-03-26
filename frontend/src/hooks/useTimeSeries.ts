@@ -9,6 +9,7 @@ interface UseTimeSeriesOptions {
   resample: string | null;
   fullStart: string | null;
   fullEnd: string | null;
+  excludedFlagIds: string[];
 }
 
 interface TimeRange {
@@ -16,13 +17,14 @@ interface TimeRange {
   end: string | null;
 }
 
-export function useTimeSeries({ datasetId, columnIds, resample, fullStart, fullEnd }: UseTimeSeriesOptions) {
+export function useTimeSeries({ datasetId, columnIds, resample, fullStart, fullEnd, excludedFlagIds }: UseTimeSeriesOptions) {
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [visibleRange, setVisibleRange] = useState<TimeRange>({ start: fullStart, end: fullEnd });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const columnKey = useMemo(() => columnIds.join(","), [columnIds]);
+  const excludedFlagKey = useMemo(() => excludedFlagIds.join(","), [excludedFlagIds]);
 
   useEffect(() => {
     setVisibleRange({ start: fullStart, end: fullEnd });
@@ -45,6 +47,7 @@ export function useTimeSeries({ datasetId, columnIds, resample, fullStart, fullE
         end: visibleRange.end,
         columns: columnIds,
         resample,
+        exclude_flags: excludedFlagIds,
       })
         .then((response) => {
           if (!cancelled) {
@@ -64,7 +67,7 @@ export function useTimeSeries({ datasetId, columnIds, resample, fullStart, fullE
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [columnIds, columnKey, datasetId, resample, visibleRange.end, visibleRange.start]);
+  }, [columnIds, columnKey, datasetId, excludedFlagIds, excludedFlagKey, resample, visibleRange.end, visibleRange.start]);
 
   return {
     data,

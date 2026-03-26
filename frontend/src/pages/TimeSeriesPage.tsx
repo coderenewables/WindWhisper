@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
 import { getDataset, listProjectDatasets } from "../api/datasets";
+import { listFlaggedRanges, listFlags } from "../api/qc";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { ChannelSelector } from "../components/timeseries/ChannelSelector";
 import { TimeSeriesChart } from "../components/timeseries/TimeSeriesChart";
@@ -10,6 +11,7 @@ import { TimeSeriesControls } from "../components/timeseries/TimeSeriesControls"
 import { useTimeSeries } from "../hooks/useTimeSeries";
 import { useProjectStore } from "../stores/projectStore";
 import type { DatasetDetail, DatasetSummary } from "../types/dataset";
+import type { Flag, FlaggedRange } from "../types/qc";
 
 const chartPalette = ["#1f8f84", "#f06f32", "#2563eb", "#7c3aed", "#059669", "#dc2626", "#0891b2", "#ca8a04"];
 
@@ -30,8 +32,12 @@ export function TimeSeriesPage() {
   const [datasetDetail, setDatasetDetail] = useState<DatasetDetail | null>(null);
   const [selectedColumnIds, setSelectedColumnIds] = useState<string[]>([]);
   const [resample, setResample] = useState("raw");
+  const [flags, setFlags] = useState<Flag[]>([]);
+  const [flaggedRanges, setFlaggedRanges] = useState<FlaggedRange[]>([]);
+  const [excludedFlagIds, setExcludedFlagIds] = useState<string[]>([]);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
   const [isLoadingDatasetDetail, setIsLoadingDatasetDetail] = useState(false);
+  const [isLoadingFlags, setIsLoadingFlags] = useState(false);
   const [datasetsError, setDatasetsError] = useState<string | null>(null);
   const [datasetDetailError, setDatasetDetailError] = useState<string | null>(null);
   const { projects, fetchProjects } = useProjectStore();
@@ -85,6 +91,9 @@ export function TimeSeriesPage() {
     if (!datasetId) {
       setDatasetDetail(null);
       setSelectedColumnIds([]);
+      setFlags([]);
+      setFlaggedRanges([]);
+      setExcludedFlagIds([]);
       return;
     }
 
@@ -116,6 +125,39 @@ export function TimeSeriesPage() {
     };
   }, [datasetId]);
 
+  useEffect(() => {
+    if (!datasetId) {
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingFlags(true);
+    void Promise.all([listFlags(datasetId), listFlaggedRanges(datasetId)])
+      .then(([nextFlags, nextRanges]) => {
+        if (cancelled) {
+          return;
+        }
+        setFlags(nextFlags);
+        setFlaggedRanges(nextRanges);
+        setExcludedFlagIds((current) => current.filter((flagId) => nextFlags.some((flag) => flag.id === flagId)));
+        setIsLoadingFlags(false);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setFlags([]);
+          setFlaggedRanges([]);
+          setExcludedFlagIds([]);
+          setIsLoadingFlags(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [datasetId]);
+
+  const visibleFlaggedRanges = flaggedRanges.filter((flaggedRange) => !excludedFlagIds.includes(flaggedRange.flag_id));
+  const flagMetaById = Object.fromEntries(flags.map((flag) => [flag.id, { name: flag.name, color: flag.color }]));
   const colorByColumnId = useMemo(() => {
     if (!datasetDetail) {
       return {} as Record<string, string>;
@@ -130,6 +172,7 @@ export function TimeSeriesPage() {
     resample: resample === "raw" ? null : resample,
     fullStart: datasetDetail?.start_time ?? null,
     fullEnd: datasetDetail?.end_time ?? null,
+    excludedFlagIds,
   });
 
   const activeProject = projects.find((project) => project.id === projectId) ?? null;
@@ -270,9 +313,15 @@ export function TimeSeriesPage() {
             appliedResample={data?.resample ?? null}
             start={visibleRange.start}
             end={visibleRange.end}
+            flags={flags}
+            excludedFlagIds={excludedFlagIds}
             onResampleChange={setResample}
             onRangeChange={setVisibleRange}
             onFitAll={() => setVisibleRange({ start: datasetDetail.start_time, end: datasetDetail.end_time })}
+            onToggleFlagExclusion={(flagId) =>
+              setExcludedFlagIds((current) => current.includes(flagId) ? current.filter((item) => item !== flagId) : [...current, flagId])
+            }
+            onSetShowCleanDataOnly={(value) => setExcludedFlagIds(value ? flags.map((flag) => flag.id) : [])}
           />
 
           <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
@@ -294,10 +343,13 @@ export function TimeSeriesPage() {
               selectedColumnIds={selectedColumnIds}
               colorByColumnId={colorByColumnId}
               data={data}
-              isLoading={isLoading || isLoadingDatasetDetail}
+              isLoading={isLoading || isLoadingDatasetDetail || isLoadingFlags}
               error={error}
               onRangeChange={setVisibleRange}
               onFitAll={() => setVisibleRange({ start: datasetDetail.start_time, end: datasetDetail.end_time })}
+              flaggedRanges={visibleFlaggedRanges}
+              flagMetaById={flagMetaById}
+              excludedFlagIds={excludedFlagIds}
             />
           </section>
         </>

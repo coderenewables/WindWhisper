@@ -21,6 +21,7 @@ interface TimeSeriesChartProps {
   onFitAll: () => void;
   flaggedRanges?: FlaggedRange[];
   flagMetaById?: Record<string, { name: string; color: string | null }>;
+  excludedFlagIds?: string[];
   manualSelectionEnabled?: boolean;
   onManualRangeSelected?: (next: { start: string; end: string }) => void;
 }
@@ -46,6 +47,7 @@ export function TimeSeriesChart({
   onFitAll,
   flaggedRanges = [],
   flagMetaById = {},
+  excludedFlagIds = [],
   manualSelectionEnabled = false,
   onManualRangeSelected,
 }: TimeSeriesChartProps) {
@@ -123,6 +125,9 @@ export function TimeSeriesChart({
     .filter((trace): trace is PlotData => trace !== null);
 
   const hasSecondaryAxis = selectedColumnIds.some((columnId) => usesSecondaryAxis(columnsById[columnId]));
+  const excludedFlags = excludedFlagIds
+    .map((flagId) => ({ id: flagId, ...flagMetaById[flagId] }))
+    .filter((flag): flag is { id: string; name: string; color: string | null } => Boolean(flag?.name));
   const overlayShapes = useMemo<Partial<Shape>[]>(
     () =>
       flaggedRanges.map((flaggedRange) => {
@@ -189,6 +194,22 @@ export function TimeSeriesChart({
         </div>
         {isLoading ? <LoadingSpinner label="Refreshing" /> : null}
       </div>
+
+      {excludedFlags.length > 0 ? (
+        <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+          <p className="font-medium">Flagged data is currently excluded from this chart.</p>
+          <p className="mt-1 text-amber-800">Gaps in the plotted lines indicate timestamps removed by the selected QC filters.</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {excludedFlags.map((flag) => (
+              <span key={flag.id} className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-white/80 px-3 py-1 text-xs font-medium uppercase tracking-[0.14em] text-amber-900">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: flag.color ?? "#1f8f84" }} />
+                {flag.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       <Plot
         data={traces}
         layout={layout}

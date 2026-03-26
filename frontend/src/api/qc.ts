@@ -7,6 +7,8 @@ import type {
   FlagRuleCreatePayload,
   FlagRuleUpdatePayload,
   ManualFlagRequestPayload,
+  TowerShadowRequestPayload,
+  TowerShadowResponse,
 } from "../types/qc";
 
 export async function listFlags(datasetId: string): Promise<Flag[]> {
@@ -59,4 +61,9 @@ export async function createManualFlaggedRange(flagId: string, payload: ManualFl
 
 export async function deleteFlaggedRange(rangeId: string): Promise<void> {
   await apiClient.delete(`/qc/flagged-ranges/${rangeId}`);
+}
+
+export async function runTowerShadowDetection(datasetId: string, payload: TowerShadowRequestPayload): Promise<TowerShadowResponse> {
+  const response = await apiClient.post<TowerShadowResponse>(`/qc/tower-shadow/${datasetId}`, payload);
+  return response.data;
 }

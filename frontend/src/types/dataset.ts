@@ -102,6 +102,7 @@ export interface TimeSeriesResponse {
   resample: string | null;
   start_time: string | null;
   end_time: string | null;
+  excluded_flag_ids: string[];
   timestamps: string[];
   columns: Record<string, TimeSeriesColumnSeries>;
 }
@@ -111,4 +112,5 @@ export interface DatasetTimeseriesQuery {
   end?: string | null;
   columns?: string[];
   resample?: string | null;
+  exclude_flags?: string[];
 }

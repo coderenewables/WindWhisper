@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -105,3 +106,42 @@ class FlaggedRangeResponse(BaseModel):
     end_time: datetime
     applied_by: str
     column_ids: list[uuid.UUID] | None = None
+
+
+class TowerShadowMethod(str, Enum):
+    manual = "manual"
+    auto = "auto"
+
+
+class TowerShadowRequest(BaseModel):
+    method: TowerShadowMethod
+    boom_orientations: list[float] | None = None
+    direction_column_id: uuid.UUID | None = None
+    shadow_width: float = Field(default=20.0, gt=0, le=90)
+    apply: bool = False
+    flag_name: str = Field(default="Tower Shadow", min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_tower_shadow_request(self) -> "TowerShadowRequest":
+        if self.method == TowerShadowMethod.manual and not self.boom_orientations:
+            raise ValueError("boom_orientations are required for manual tower shadow detection")
+        return self
+
+
+class TowerShadowSectorResponse(BaseModel):
+    direction_start: float
+    direction_end: float
+    affected_column_ids: list[uuid.UUID] = Field(default_factory=list)
+    affected_column_names: list[str] = Field(default_factory=list)
+    point_count: int = 0
+    range_count: int = 0
+
+
+class TowerShadowResponse(BaseModel):
+    method: TowerShadowMethod
+    direction_column_id: uuid.UUID
+    sectors: list[TowerShadowSectorResponse] = Field(default_factory=list)
+    preview_point_count: int = 0
+    applied: bool = False
+    flag_id: uuid.UUID | None = None
+    flag_name: str | None = None

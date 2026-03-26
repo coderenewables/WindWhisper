@@ -69,17 +69,28 @@ async def get_flagged_range_or_404(db: AsyncSession, range_id: uuid.UUID) -> Fla
     return flagged_range
 
 
-async def load_dataset_frame(db: AsyncSession, dataset_id: uuid.UUID) -> LoadedDatasetFrame:
+async def load_dataset_frame(
+    db: AsyncSession,
+    dataset_id: uuid.UUID,
+    *,
+    column_ids: list[uuid.UUID] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> LoadedDatasetFrame:
     dataset = await get_dataset_or_404(db, dataset_id)
-    rows = (
-        await db.execute(
-            select(TimeseriesData.timestamp, TimeseriesData.values_json)
-            .where(TimeseriesData.dataset_id == dataset_id)
-            .order_by(TimeseriesData.timestamp.asc()),
-        )
-    ).all()
+    selected_columns = dataset.columns
+    if column_ids is not None:
+        selected_columns = [column for column in dataset.columns if column.id in column_ids]
 
-    column_names = [column.name for column in dataset.columns]
+    statement = select(TimeseriesData.timestamp, TimeseriesData.values_json).where(TimeseriesData.dataset_id == dataset_id)
+    if start is not None:
+        statement = statement.where(TimeseriesData.timestamp >= start)
+    if end is not None:
+        statement = statement.where(TimeseriesData.timestamp <= end)
+
+    rows = (await db.execute(statement.order_by(TimeseriesData.timestamp.asc()))).all()
+
+    column_names = [column.name for column in selected_columns]
     records: list[dict[str, Any]] = []
     for timestamp, values_json in rows:
         record = {"timestamp": timestamp}
@@ -98,9 +109,61 @@ async def load_dataset_frame(db: AsyncSession, dataset_id: uuid.UUID) -> LoadedD
 
     return LoadedDatasetFrame(
         dataset=dataset,
-        columns_by_id={column.id: column for column in dataset.columns},
+        columns_by_id={column.id: column for column in selected_columns},
         frame=frame,
     )
+
+
+async def filter_flagged_data(
+    db: AsyncSession,
+    frame: pd.DataFrame,
+    dataset_id: uuid.UUID,
+    columns_by_id: dict[uuid.UUID, DataColumn],
+    exclude_flag_ids: list[uuid.UUID] | None,
+) -> pd.DataFrame:
+    if frame.empty or not exclude_flag_ids:
+        return frame
+
+    rows = (
+        await db.execute(
+            select(FlaggedRange)
+            .join(Flag, Flag.id == FlaggedRange.flag_id)
+            .where(Flag.dataset_id == dataset_id, FlaggedRange.flag_id.in_(exclude_flag_ids))
+            .order_by(FlaggedRange.start_time.asc(), FlaggedRange.id.asc()),
+        )
+    ).scalars().all()
+    if not rows:
+        return frame
+
+    filtered = frame.copy()
+    column_names_by_id = {column_id: column.name for column_id, column in columns_by_id.items()}
+    for flagged_range in rows:
+        mask = (filtered.index >= flagged_range.start_time) & (filtered.index <= flagged_range.end_time)
+        if not mask.any():
+            continue
+
+        if flagged_range.column_ids:
+            target_columns = [column_names_by_id[column_id] for column_id in flagged_range.column_ids if column_id in column_names_by_id]
+            if target_columns:
+                filtered.loc[mask, target_columns] = pd.NA
+            continue
+
+        filtered.loc[mask, :] = pd.NA
+
+    return filtered
+
+
+async def get_clean_dataframe(
+    db: AsyncSession,
+    dataset_id: uuid.UUID,
+    *,
+    column_ids: list[uuid.UUID] | None = None,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    exclude_flag_ids: list[uuid.UUID] | None = None,
+) -> pd.DataFrame:
+    loaded = await load_dataset_frame(db, dataset_id, column_ids=column_ids, start=start, end=end)
+    return await filter_flagged_data(db, loaded.frame, dataset_id, loaded.columns_by_id, exclude_flag_ids)
 
 
 def _expected_gap_tolerance(dataset: Dataset, frame: pd.DataFrame) -> timedelta:

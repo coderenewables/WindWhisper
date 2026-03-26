@@ -239,3 +239,110 @@ async def test_apply_rules_supports_grouping_and_or_logic(client: AsyncClient, d
     assert flagged_ranges[1]["end_time"] == "2025-01-01T00:30:00Z"
     assert flagged_ranges[2]["start_time"] == "2025-01-01T00:50:00Z"
     assert flagged_ranges[2]["end_time"] == "2025-01-01T00:50:00Z"
+
+
+async def _seed_tower_shadow_dataset(db_session: AsyncSession) -> tuple[Project, Dataset, DataColumn, DataColumn, DataColumn]:
+    project = Project(name="Tower Shadow Site")
+    db_session.add(project)
+    await db_session.flush()
+
+    dataset = Dataset(
+        project_id=project.id,
+        name="Tower Shadow Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=datetime(2025, 2, 1, 0, 0, tzinfo=UTC),
+        end_time=datetime(2025, 2, 1, 6, 0, tzinfo=UTC),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    direction_column = DataColumn(dataset_id=dataset.id, name="Dir_80m", measurement_type="direction", height_m=80)
+    speed_a = DataColumn(dataset_id=dataset.id, name="Speed_A_80m", measurement_type="speed", height_m=80)
+    speed_b = DataColumn(dataset_id=dataset.id, name="Speed_B_80m", measurement_type="speed", height_m=80)
+    db_session.add_all([direction_column, speed_a, speed_b])
+    await db_session.flush()
+
+    base_time = datetime(2025, 2, 1, 0, 0, tzinfo=UTC)
+    shadow_rows = [
+        {"Dir_80m": 170, "Speed_A_80m": 2.0, "Speed_B_80m": 8.0},
+        {"Dir_80m": 175, "Speed_A_80m": 2.0, "Speed_B_80m": 8.0},
+        {"Dir_80m": 180, "Speed_A_80m": 1.0, "Speed_B_80m": 8.0},
+        {"Dir_80m": 185, "Speed_A_80m": 2.0, "Speed_B_80m": 8.0},
+        {"Dir_80m": 190, "Speed_A_80m": 2.0, "Speed_B_80m": 8.0},
+    ]
+    normal_rows = [
+        {"Dir_80m": direction, "Speed_A_80m": 8.0, "Speed_B_80m": 8.0}
+        for direction in [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150, 155]
+    ]
+    rows = shadow_rows + normal_rows
+    db_session.add_all(
+        [
+            TimeseriesData(dataset_id=dataset.id, timestamp=base_time + timedelta(minutes=index * 10), values_json=row)
+            for index, row in enumerate(rows)
+        ],
+    )
+    await db_session.commit()
+    return project, dataset, direction_column, speed_a, speed_b
+
+
+async def test_manual_tower_shadow_preview_and_apply(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, direction_column, speed_a, _ = await _seed_tower_shadow_dataset(db_session)
+
+    preview_response = await client.post(
+        f"/api/qc/tower-shadow/{dataset.id}",
+        json={
+            "method": "manual",
+            "direction_column_id": str(direction_column.id),
+            "boom_orientations": [0],
+            "shadow_width": 20,
+            "apply": False,
+        },
+    )
+
+    assert preview_response.status_code == 200
+    preview_payload = preview_response.json()
+    assert preview_payload["preview_point_count"] == 10
+    assert len(preview_payload["sectors"]) >= 1
+    assert preview_payload["sectors"][0]["affected_column_ids"] == [str(speed_a.id)]
+
+    apply_response = await client.post(
+        f"/api/qc/tower-shadow/{dataset.id}",
+        json={
+            "method": "manual",
+            "direction_column_id": str(direction_column.id),
+            "boom_orientations": [0],
+            "shadow_width": 20,
+            "apply": True,
+        },
+    )
+
+    assert apply_response.status_code == 200
+    apply_payload = apply_response.json()
+    assert apply_payload["applied"] is True
+    assert apply_payload["flag_id"] is not None
+
+    flagged_ranges_response = await client.get(f"/api/qc/datasets/{dataset.id}/flagged-ranges")
+    assert flagged_ranges_response.status_code == 200
+    ranges = flagged_ranges_response.json()
+    assert len(ranges) >= 1
+    assert any(str(speed_a.id) in (flagged_range["column_ids"] or []) for flagged_range in ranges)
+
+
+async def test_auto_tower_shadow_detects_shadow_sector(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, direction_column, speed_a, speed_b = await _seed_tower_shadow_dataset(db_session)
+
+    response = await client.post(
+        f"/api/qc/tower-shadow/{dataset.id}",
+        json={
+            "method": "auto",
+            "direction_column_id": str(direction_column.id),
+            "apply": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["preview_point_count"] >= 5
+    assert len(payload["sectors"]) >= 1
+    assert set(payload["sectors"][0]["affected_column_ids"]) == {str(speed_a.id), str(speed_b.id)}

@@ -51,5 +51,6 @@ class TimeSeriesResponse(BaseModel):
     resample: str | None = None
     start_time: datetime | None = None
     end_time: datetime | None = None
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
     timestamps: list[datetime] = Field(default_factory=list)
     columns: dict[str, TimeSeriesColumnResponse] = Field(default_factory=dict)

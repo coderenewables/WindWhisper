@@ -70,6 +70,7 @@ export async function getDatasetTimeseries(datasetId: string, query: DatasetTime
       end: query.end || undefined,
       columns: query.columns?.length ? query.columns.join(",") : undefined,
       resample: query.resample || undefined,
+      exclude_flags: query.exclude_flags?.length ? query.exclude_flags.join(",") : undefined,
     },
   });
   return response.data;

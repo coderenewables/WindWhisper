@@ -21,6 +21,7 @@ from app.schemas.timeseries import (
     TimeSeriesColumnResponse,
     TimeSeriesResponse,
 )
+from app.services.qc_engine import get_clean_dataframe
 
 
 router = APIRouter(prefix="/api", tags=["datasets"])
@@ -87,6 +88,22 @@ def _parse_column_ids(raw_column_ids: str | None) -> list[uuid.UUID] | None:
     return parsed_ids
 
 
+def _parse_flag_ids(raw_flag_ids: str | None) -> list[uuid.UUID] | None:
+    if raw_flag_ids is None or not raw_flag_ids.strip():
+        return None
+
+    parsed_ids: list[uuid.UUID] = []
+    for item in raw_flag_ids.split(","):
+        try:
+            parsed_ids.append(uuid.UUID(item.strip()))
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid flag id: {item.strip()}",
+            ) from exc
+    return parsed_ids
+
+
 def _apply_resample(frame: pd.DataFrame, resample_rule: str | None) -> tuple[pd.DataFrame, str | None]:
     applied_rule = resample_rule
     if resample_rule:
@@ -105,7 +122,9 @@ def _apply_resample(frame: pd.DataFrame, resample_rule: str | None) -> tuple[pd.
         frame = frame.resample(auto_rule).mean(numeric_only=True)
         applied_rule = applied_rule or auto_rule
 
-    return frame.dropna(how="all"), applied_rule
+    if applied_rule:
+        return frame.dropna(how="all"), applied_rule
+    return frame, applied_rule
 
 
 async def _get_dataset_or_404(db: AsyncSession, dataset_id: uuid.UUID) -> Dataset:
@@ -172,9 +191,11 @@ async def get_dataset_timeseries(
     end: datetime | None = Query(default=None),
     columns: str | None = Query(default=None),
     resample: str | None = Query(default=None),
+    exclude_flags: str | None = Query(default=None),
 ) -> TimeSeriesResponse:
     dataset = await _get_dataset_or_404(db, dataset_id)
     requested_column_ids = _parse_column_ids(columns)
+    excluded_flag_ids = _parse_flag_ids(exclude_flags)
 
     selected_columns = dataset.columns
     if requested_column_ids is not None:
@@ -186,19 +207,10 @@ async def get_dataset_timeseries(
             )
 
     if not selected_columns:
-        return TimeSeriesResponse(dataset_id=dataset.id, resample=resample)
-
-    statement = select(TimeseriesData.timestamp, TimeseriesData.values_json).where(TimeseriesData.dataset_id == dataset.id)
-    if start is not None:
-        statement = statement.where(TimeseriesData.timestamp >= start)
-    if end is not None:
-        statement = statement.where(TimeseriesData.timestamp <= end)
-
-    rows = (await db.execute(statement.order_by(TimeseriesData.timestamp.asc()))).all()
-    if not rows:
         return TimeSeriesResponse(
             dataset_id=dataset.id,
             resample=resample,
+            excluded_flag_ids=excluded_flag_ids or [],
             start_time=start,
             end_time=end,
             timestamps=[],
@@ -213,17 +225,34 @@ async def get_dataset_timeseries(
             },
         )
 
-    records = []
-    for timestamp, values_json in rows:
-        record = {"timestamp": timestamp}
-        for column in selected_columns:
-            record[column.name] = values_json.get(column.name)
-        records.append(record)
+    frame = await get_clean_dataframe(
+        db,
+        dataset.id,
+        column_ids=[column.id for column in selected_columns],
+        start=start,
+        end=end,
+        exclude_flag_ids=excluded_flag_ids,
+    )
 
-    frame = pd.DataFrame.from_records(records)
-    frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
-    frame = frame.set_index("timestamp").sort_index()
-    frame = frame.apply(pd.to_numeric, errors="coerce")
+    if frame.empty:
+        return TimeSeriesResponse(
+            dataset_id=dataset.id,
+            resample=resample,
+            excluded_flag_ids=excluded_flag_ids or [],
+            start_time=start,
+            end_time=end,
+            timestamps=[],
+            columns={
+                str(column.id): TimeSeriesColumnResponse(
+                    name=column.name,
+                    unit=column.unit,
+                    measurement_type=column.measurement_type,
+                    values=[],
+                )
+                for column in selected_columns
+            },
+        )
+
     frame, applied_resample = _apply_resample(frame, resample)
 
     timestamps = list(frame.index.to_pydatetime())
@@ -240,6 +269,7 @@ async def get_dataset_timeseries(
     return TimeSeriesResponse(
         dataset_id=dataset.id,
         resample=applied_resample,
+        excluded_flag_ids=excluded_flag_ids or [],
         start_time=timestamps[0] if timestamps else start,
         end_time=timestamps[-1] if timestamps else end,
         timestamps=timestamps,

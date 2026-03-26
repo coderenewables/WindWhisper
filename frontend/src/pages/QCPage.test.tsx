@@ -54,6 +54,10 @@ vi.mock("../components/timeseries/TimeSeriesChart", () => ({
   TimeSeriesChart: () => <div>Chart stub</div>,
 }));
 
+vi.mock("../components/qc/TowerShadowDetector", () => ({
+  TowerShadowDetector: () => <div>Tower shadow stub</div>,
+}));
+
 vi.mock("../stores/projectStore", () => ({
   useProjectStore: () => ({
     projects: [{ id: "project-1", name: "Alpha Site" }],
