@@ -8,6 +8,12 @@ import type {
   ExtrapolateResponse,
   HistogramRequest,
   HistogramResponse,
+  MCPComparisonRequest,
+  MCPComparisonResponse,
+  MCPCorrelationRequest,
+  MCPCorrelationResponse,
+  MCPPredictionRequest,
+  MCPPredictionResponse,
   ShearRequest,
   ShearResponse,
   TurbulenceRequest,
@@ -55,5 +61,20 @@ export async function getExtremeWindAnalysis(datasetId: string, payload: Extreme
 
 export async function createExtrapolatedChannel(datasetId: string, payload: ExtrapolateRequest): Promise<ExtrapolateResponse> {
   const response = await apiClient.post<ExtrapolateResponse>(`/analysis/extrapolate/${datasetId}`, payload);
+  return response.data;
+}
+
+export async function getMcpCorrelation(payload: MCPCorrelationRequest): Promise<MCPCorrelationResponse> {
+  const response = await apiClient.post<MCPCorrelationResponse>("/mcp/correlate", payload);
+  return response.data;
+}
+
+export async function getMcpPrediction(payload: MCPPredictionRequest): Promise<MCPPredictionResponse> {
+  const response = await apiClient.post<MCPPredictionResponse>("/mcp/predict", payload);
+  return response.data;
+}
+
+export async function getMcpComparison(payload: MCPComparisonRequest): Promise<MCPComparisonResponse> {
+  const response = await apiClient.post<MCPComparisonResponse>("/mcp/compare", payload);
   return response.data;
 }

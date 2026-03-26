@@ -23,6 +23,11 @@ const AnalysisPage = lazy(async () => {
   return { default: module.AnalysisPage };
 });
 
+const MCPPage = lazy(async () => {
+  const module = await import("./pages/MCPPage");
+  return { default: module.MCPPage };
+});
+
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
     <section className="panel-surface flex min-h-[320px] flex-col justify-between p-8">
@@ -77,15 +82,7 @@ export default function App() {
         <Route path="time-series" element={<Suspense fallback={<RouteFallback />}><TimeSeriesPage /></Suspense>} />
         <Route path="qc" element={<Suspense fallback={<RouteFallback />}><QCPage /></Suspense>} />
         <Route path="analysis" element={<Suspense fallback={<RouteFallback />}><AnalysisPage /></Suspense>} />
-        <Route
-          path="mcp"
-          element={
-            <PlaceholderPage
-              title="MCP Workspace"
-              description="Measure-correlate-predict setup and adjustment results will use this route later in the roadmap."
-            />
-          }
-        />
+        <Route path="mcp" element={<Suspense fallback={<RouteFallback />}><MCPPage /></Suspense>} />
         <Route
           path="energy"
           element={

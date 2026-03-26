@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.analysis import router as analysis_router
 from app.api.datasets import router as datasets_router
 from app.api.import_engine import router as import_router
+from app.api.mcp import router as mcp_router
 from app.api.projects import router as projects_router
 from app.api.qc import router as qc_router
 from app.config import settings
@@ -53,3 +54,4 @@ app.include_router(datasets_router)
 app.include_router(import_router)
 app.include_router(qc_router)
 app.include_router(analysis_router)
+app.include_router(mcp_router)

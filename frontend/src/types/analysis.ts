@@ -338,6 +338,164 @@ export interface ExtremeWindSummary {
   warning_message: string | null;
 }
 
+export type MCPMethod = "linear" | "variance_ratio" | "matrix";
+
+export interface MCPCorrelationPoint {
+  timestamp: string;
+  site_value: number;
+  ref_value: number;
+  month: number;
+}
+
+export interface MCPCorrelationStats {
+  sample_count: number;
+  pearson_r: number;
+  r_squared: number;
+  rmse: number;
+  bias: number;
+  slope: number;
+  intercept: number;
+  concurrent_start: string;
+  concurrent_end: string;
+}
+
+export interface MCPCorrelationRequest {
+  site_dataset_id: string;
+  site_column_id: string;
+  ref_dataset_id: string;
+  ref_column_id: string;
+  site_column_ids?: string[];
+  ref_column_ids?: string[];
+  site_exclude_flags?: string[];
+  ref_exclude_flags?: string[];
+  max_points?: number;
+}
+
+export interface MCPCorrelationResponse {
+  site_dataset_id: string;
+  site_column_id: string;
+  ref_dataset_id: string;
+  ref_column_id: string;
+  site_column_ids: string[];
+  ref_column_ids: string[];
+  site_excluded_flag_ids: string[];
+  ref_excluded_flag_ids: string[];
+  stats: MCPCorrelationStats;
+  scatter_points: MCPCorrelationPoint[];
+}
+
+export interface MCPPredictedPoint {
+  timestamp: string;
+  value: number;
+}
+
+export interface MCPMonthlyMean {
+  month: number;
+  mean_speed: number;
+  sample_count: number;
+}
+
+export interface MCPAnnualMean {
+  year: number;
+  mean_speed: number;
+  sample_count: number;
+}
+
+export interface MCPWeibullSummary {
+  method: string;
+  k: number;
+  A: number;
+  mean_speed: number;
+  mean_power_density: number;
+  r_squared: number;
+  rmse: number;
+  ks_stat: number;
+}
+
+export interface MCPSummary {
+  method: MCPMethod;
+  sample_count: number;
+  start_time: string;
+  end_time: string;
+  long_term_mean_speed: number;
+  monthly_means: MCPMonthlyMean[];
+  annual_means: MCPAnnualMean[];
+  weibull: MCPWeibullSummary | null;
+}
+
+export interface MCPCrossValidationFold {
+  period: string;
+  sample_count: number;
+  rmse: number;
+  bias: number;
+  skill_score: number;
+}
+
+export interface MCPCrossValidation {
+  fold_count: number;
+  rmse: number;
+  bias: number;
+  skill_score: number;
+  uncertainty: number;
+  folds: MCPCrossValidationFold[];
+}
+
+export interface MCPMatrixOutput {
+  site_column_id: string;
+  params: Record<string, number>;
+  stats: MCPCorrelationStats;
+  summary: MCPSummary;
+  predicted_points: MCPPredictedPoint[];
+}
+
+export interface MCPPredictionRequest extends MCPCorrelationRequest {
+  method?: MCPMethod;
+  max_prediction_points?: number;
+}
+
+export interface MCPPredictionResponse {
+  site_dataset_id: string;
+  site_column_id: string;
+  ref_dataset_id: string;
+  ref_column_id: string;
+  site_column_ids: string[];
+  ref_column_ids: string[];
+  method: MCPMethod;
+  site_excluded_flag_ids: string[];
+  ref_excluded_flag_ids: string[];
+  params: Record<string, number>;
+  stats: MCPCorrelationStats;
+  summary: MCPSummary;
+  predicted_points: MCPPredictedPoint[];
+  matrix_outputs: MCPMatrixOutput[];
+}
+
+export interface MCPComparisonRequest extends MCPCorrelationRequest {
+  methods?: MCPMethod[];
+}
+
+export interface MCPComparisonRow {
+  method: MCPMethod;
+  params: Record<string, number>;
+  stats: MCPCorrelationStats;
+  summary: MCPSummary;
+  cross_validation: MCPCrossValidation;
+  uncertainty: number;
+}
+
+export interface MCPComparisonResponse {
+  site_dataset_id: string;
+  site_column_id: string;
+  ref_dataset_id: string;
+  ref_column_id: string;
+  site_column_ids: string[];
+  ref_column_ids: string[];
+  site_excluded_flag_ids: string[];
+  ref_excluded_flag_ids: string[];
+  recommended_method: MCPMethod;
+  results: MCPComparisonRow[];
+}
+
 export interface ExtremeWindResponse {
   dataset_id: string;
   speed_column_id: string;

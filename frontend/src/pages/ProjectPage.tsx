@@ -160,6 +160,13 @@ export function ProjectPage() {
                       <ShieldCheck className="h-4 w-4" />
                       QC workspace
                     </Link>
+                    <Link
+                      to={`/mcp?projectId=${project.id}${datasets[1] ? `&siteDatasetId=${datasets[0].id}&refDatasetId=${datasets[1].id}` : datasets[0] ? `&siteDatasetId=${datasets[0].id}&refDatasetId=${datasets[0].id}` : ""}`}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+                    >
+                      <Radar className="h-4 w-4" />
+                      MCP workspace
+                    </Link>
                   </div>
                 ) : null}
               </div>
@@ -196,6 +203,13 @@ export function ProjectPage() {
                         >
                           <ShieldCheck className="h-4 w-4" />
                           QC
+                        </Link>
+                        <Link
+                          to={`/mcp?projectId=${project.id}&siteDatasetId=${dataset.id}&refDatasetId=${datasets.find((item) => item.id !== dataset.id)?.id ?? dataset.id}`}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+                        >
+                          <Radar className="h-4 w-4" />
+                          MCP
                         </Link>
                       </div>
                     </div>

@@ -118,13 +118,15 @@ function buildRepresentativeChart(data: TurbulenceResponse | null) {
 
 function polarArc(bin: TurbulenceDirectionBin, maxValue: number) {
   const outerRadius = maxValue > 0 && bin.representative_ti != null ? 28 + (bin.representative_ti / maxValue) * (polarRadius - 28) : 28;
-  return d3
-    .arc<unknown>()
+  const generator = d3
+    .arc()
     .innerRadius(24)
     .outerRadius(outerRadius)
     .startAngle((bin.start_angle * Math.PI) / 180)
     .endAngle((bin.end_angle * Math.PI) / 180)
-    .padAngle(0.02)();
+    .padAngle(0.02);
+
+  return generator({} as never);
 }
 
 export function TurbulencePanel({ data, isLoading, error }: TurbulencePanelProps) {
