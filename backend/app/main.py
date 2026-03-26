@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.analysis import router as analysis_router
 from app.api.datasets import router as datasets_router
 from app.api.import_engine import router as import_router
 from app.api.projects import router as projects_router
@@ -51,3 +52,4 @@ app.include_router(projects_router)
 app.include_router(datasets_router)
 app.include_router(import_router)
 app.include_router(qc_router)
+app.include_router(analysis_router)

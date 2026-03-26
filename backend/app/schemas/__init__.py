@@ -1,3 +1,13 @@
+from app.schemas.analysis import (
+	HistogramBinResponse,
+	HistogramRequest,
+	HistogramResponse,
+	HistogramStatsResponse,
+	WindRoseRequest,
+	WindRoseResponse,
+	WindRoseSectorResponse,
+	WindRoseSpeedBinResponse,
+)
 from app.schemas.dataset import (
 	ColumnInfo,
 	ConfirmImportRequest,
@@ -32,6 +42,14 @@ __all__ = [
 	"DatasetListResponse",
 	"DatasetSummaryResponse",
 	"ExcelSheetListResponse",
+	"HistogramBinResponse",
+	"HistogramRequest",
+	"HistogramResponse",
+	"HistogramStatsResponse",
+	"WindRoseRequest",
+	"WindRoseResponse",
+	"WindRoseSectorResponse",
+	"WindRoseSpeedBinResponse",
 	"FlagCreate",
 	"FlaggedRangeResponse",
 	"FlagResponse",
