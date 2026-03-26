@@ -13,9 +13,10 @@
 1. [Project Overview](#1-project-overview)
 2. [Technical Architecture](#2-technical-architecture)
 3. [Technology Stack](#3-technology-stack)
-4. [Feature Mapping](#4-feature-mapping-windographer-to-WindWhisper)
-5. [Development Phases](#5-development-phases)
-6. [Incremental Daily Tasks](#6-incremental-daily-tasks)
+4. [Backend Execution Environment](#4-backend-execution-environment)
+5. [Feature Mapping](#5-feature-mapping-windographer-to-windwhisper)
+6. [Development Phases](#6-development-phases)
+7. [Incremental Daily Tasks](#7-incremental-daily-tasks)
 
 ---
 
@@ -373,7 +374,50 @@ CREATE TABLE analysis_results (
 
 ---
 
-## 4. Feature Mapping: Windographer → WindWhisper
+## 4. Backend Execution Environment
+
+All coding AI agents and human contributors must run backend Python commands inside the Conda environment named `windwhisper`. Do not run backend tasks against the base environment or any system Python interpreter.
+
+The `windwhisper` Conda environment is already created for this repository. Agents should activate and use it; they should not recreate it unless the user explicitly asks for environment reprovisioning.
+
+### 4.1 Required Shell Initialization
+
+Before any backend command is run in a new shell session, initialize the Conda shell hook and activate the environment.
+
+- **Windows PowerShell (required default for this repository)**:
+
+```powershell
+. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"
+conda activate windwhisper
+```
+
+- **Bash/Zsh equivalent**:
+
+```bash
+eval "$(conda shell.bash hook)"
+conda activate windwhisper
+```
+
+### 4.2 Commands Covered By This Rule
+
+This requirement applies to all backend-facing commands, including:
+
+- `uvicorn`, `fastapi`, and ad hoc `python` entrypoints
+- `alembic` migrations and schema generation
+- `pytest` and any backend test utilities
+- dependency installation for backend Python packages
+- one-off scripts, notebooks, data loaders, and maintenance commands under `backend/`
+
+### 4.3 Agent Execution Policy
+
+- Coding AI agents must prepend backend terminal workflows with `. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"`, then run `conda activate windwhisper` before invoking Python tooling.
+- If a terminal session is already activated into `windwhisper`, agents may continue using it, but they must not assume activation across fresh shells.
+- Agents should assume the `windwhisper` environment already exists and should reuse it instead of creating a new Conda environment.
+- Documentation, examples, and acceptance criteria that mention backend commands should show the environment activation step or explicitly state that the command is run inside the activated `windwhisper` environment.
+
+---
+
+## 5. Feature Mapping: Windographer → WindWhisper
 
 | # | Windographer Feature | WindWhisper Task(s) | Priority |
 |---|---------------------|-------------------|----------|
@@ -405,7 +449,7 @@ CREATE TABLE analysis_results (
 
 ---
 
-## 5. Development Phases
+## 6. Development Phases
 
 ### Phase 1: Foundation (Tasks 1–7) — ~1 week
 Set up the project skeleton, database, API scaffolding, and basic data import. By the end, a user can create a project, upload a CSV, and see the data stored.
@@ -433,7 +477,7 @@ Undo system, workflows, testing, deployment, documentation.
 
 ---
 
-## 6. Incremental Daily Tasks
+## 7. Incremental Daily Tasks
 
 ---
 
@@ -468,10 +512,11 @@ Undo system, workflows, testing, deployment, documentation.
    - Lifespan handler for DB connection pool
 5. Create `docker-compose.yml` with PostgreSQL 15 service (port 5432, volume for persistence)
 6. Create all `__init__.py` files for package structure
+7. When running backend setup or validation commands locally, always initialize the Conda hook and activate `windwhisper` before invoking Python tooling
 
 **Acceptance Criteria**:
 - [ ] `docker-compose up -d` starts PostgreSQL
-- [ ] `uvicorn app.main:app --reload` starts the server on port 8000
+- [ ] Running `. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"; conda activate windwhisper; uvicorn app.main:app --reload` from `backend/` starts the server on port 8000
 - [ ] `GET /api/health` returns 200 with JSON `{"status": "ok"}`
 - [ ] All package directories exist with `__init__.py`
 
@@ -510,12 +555,12 @@ Undo system, workflows, testing, deployment, documentation.
 2. Use `mapped_column` with SQLAlchemy 2.0 style
 3. Initialize Alembic with `alembic init alembic`
 4. Configure `alembic/env.py` to import all models and use `DATABASE_URL` from config
-5. Generate initial migration: `alembic revision --autogenerate -m "initial tables"`
-6. Run migration: `alembic upgrade head`
+5. Generate initial migration from the activated `windwhisper` environment: `alembic revision --autogenerate -m "initial tables"`
+6. Run migration from the activated `windwhisper` environment: `alembic upgrade head`
 
 **Acceptance Criteria**:
 - [ ] All 8 tables created in PostgreSQL after running migrations
-- [ ] `alembic current` shows the head revision
+- [ ] `alembic current` run inside the activated `windwhisper` environment shows the head revision
 - [ ] Models can be imported: `from app.models import Project, Dataset, ...`
 - [ ] Relationships work (Dataset.project, Flag.dataset, etc.)
 
@@ -2024,7 +2069,7 @@ Undo system, workflows, testing, deployment, documentation.
    - Known shear profile (alpha=0.2) → verify extrapolation
    - Known MCP relationship → verify prediction
 3. Fix all bugs found during testing
-4. Run full test suite: `pytest -v --tb=short`
+4. Run full test suite from the activated `windwhisper` environment: `pytest -v --tb=short`
 
 **Acceptance Criteria**:
 - [ ] All backend tests pass
@@ -2068,6 +2113,7 @@ Undo system, workflows, testing, deployment, documentation.
 6. **docs/api.md**: Full API reference (can auto-generate from FastAPI OpenAPI spec)
 7. **docs/user-guide.md**: Walkthrough of main workflows (import → QC → analysis → MCP → export)
 8. **GitHub Actions CI**: Run tests on push, lint check, build Docker images
+9. Document clearly in README and developer setup notes that all local backend commands must start by loading the Conda hook and activating `windwhisper`
 
 **Acceptance Criteria**:
 - [ ] `docker-compose up` starts the entire application

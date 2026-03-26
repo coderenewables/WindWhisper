@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: windwhisper-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: windwhisper
+      POSTGRES_USER: windwhisper
+      POSTGRES_PASSWORD: windwhisper
+    ports:
+      - "5432:5432"
+    volumes:
+      - windwhisper-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U windwhisper -d windwhisper"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  windwhisper-postgres-data:
