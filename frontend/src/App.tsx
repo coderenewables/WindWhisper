@@ -1,9 +1,22 @@
 import { BarChart3, DatabaseZap, FileUp, Gauge, LayoutDashboard, LineChart, ShieldCheck, Wind } from "lucide-react";
+import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
+import { LoadingSpinner } from "./components/common/LoadingSpinner";
 import { AppShell } from "./components/layout/AppShell";
 import { DashboardPage } from "./pages/DashboardPage";
+import { ImportPage } from "./pages/ImportPage";
 import { ProjectPage } from "./pages/ProjectPage";
+
+const TimeSeriesPage = lazy(async () => {
+  const module = await import("./pages/TimeSeriesPage");
+  return { default: module.TimeSeriesPage };
+});
+
+const QCPage = lazy(async () => {
+  const module = await import("./pages/QCPage");
+  return { default: module.QCPage };
+});
 
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
@@ -41,39 +54,23 @@ const appSections = [
   { title: "Export", path: "/export", icon: Wind },
 ];
 
+function RouteFallback() {
+  return (
+    <section className="panel-surface p-6">
+      <LoadingSpinner label="Loading workspace" />
+    </section>
+  );
+}
+
 export default function App() {
   return (
     <Routes>
       <Route element={<AppShell sections={appSections} />}>
         <Route index element={<DashboardPage />} />
         <Route path="project/:id" element={<ProjectPage />} />
-        <Route
-          path="import"
-          element={
-            <PlaceholderPage
-              title="Import Workspace"
-              description="Task 8 will layer file upload, preview, and mapping onto this shell."
-            />
-          }
-        />
-        <Route
-          path="time-series"
-          element={
-            <PlaceholderPage
-              title="Time-Series Workspace"
-              description="Charts, filtering, and channel inspection will land here once the visualization layer is added."
-            />
-          }
-        />
-        <Route
-          path="qc"
-          element={
-            <PlaceholderPage
-              title="QC Workspace"
-              description="Automated flag rules and review tools will plug into this page in later tasks."
-            />
-          }
-        />
+        <Route path="import" element={<ImportPage />} />
+        <Route path="time-series" element={<Suspense fallback={<RouteFallback />}><TimeSeriesPage /></Suspense>} />
+        <Route path="qc" element={<Suspense fallback={<RouteFallback />}><QCPage /></Suspense>} />
         <Route
           path="analysis"
           element={

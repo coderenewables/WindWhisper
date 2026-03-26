@@ -4,8 +4,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.datasets import router as datasets_router
 from app.api.import_engine import router as import_router
 from app.api.projects import router as projects_router
+from app.api.qc import router as qc_router
 from app.config import settings
 from app.database import close_database_connections, ping_database
 
@@ -46,4 +48,6 @@ async def health_check() -> dict[str, str]:
 
 
 app.include_router(projects_router)
+app.include_router(datasets_router)
 app.include_router(import_router)
+app.include_router(qc_router)

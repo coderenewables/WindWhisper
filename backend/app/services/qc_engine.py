@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
+
+import pandas as pd
+from fastapi import HTTPException, status
+from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from app.models import DataColumn, Dataset, Flag, FlagRule, FlaggedRange, TimeseriesData
+from app.schemas.qc import FlagRuleCreate
+
+
+@dataclass(slots=True)
+class LoadedDatasetFrame:
+    dataset: Dataset
+    columns_by_id: dict[uuid.UUID, DataColumn]
+    frame: pd.DataFrame
+
+
+def icing_rules(temperature_column_id: uuid.UUID, speed_sd_column_id: uuid.UUID) -> list[FlagRuleCreate]:
+    return [
+        FlagRuleCreate(column_id=temperature_column_id, operator="<", value=2, logic="AND"),
+        FlagRuleCreate(column_id=speed_sd_column_id, operator="==", value=0, logic="AND"),
+    ]
+
+
+def range_check(column_id: uuid.UUID, minimum: float, maximum: float) -> list[FlagRuleCreate]:
+    return [
+        FlagRuleCreate(column_id=column_id, operator="between", value=[minimum, maximum], logic="AND"),
+    ]
+
+
+def flat_line(column_id: uuid.UUID, duration: int) -> list[FlagRuleCreate]:
+    return [
+        FlagRuleCreate(column_id=column_id, operator="==", value=0, logic="AND"),
+        FlagRuleCreate(column_id=column_id, operator=">=", value=duration, logic="AND"),
+    ]
+
+
+async def get_flag_or_404(db: AsyncSession, flag_id: uuid.UUID) -> Flag:
+    statement = (
+        select(Flag)
+        .options(selectinload(Flag.rules), selectinload(Flag.ranges), selectinload(Flag.dataset).selectinload(Dataset.columns))
+        .where(Flag.id == flag_id)
+    )
+    flag = (await db.execute(statement)).scalar_one_or_none()
+    if flag is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flag not found")
+    return flag
+
+
+async def get_dataset_or_404(db: AsyncSession, dataset_id: uuid.UUID) -> Dataset:
+    statement = select(Dataset).options(selectinload(Dataset.columns), selectinload(Dataset.flags)).where(Dataset.id == dataset_id)
+    dataset = (await db.execute(statement)).scalar_one_or_none()
+    if dataset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    return dataset
+
+
+async def get_flagged_range_or_404(db: AsyncSession, range_id: uuid.UUID) -> FlaggedRange:
+    flagged_range = await db.get(FlaggedRange, range_id)
+    if flagged_range is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Flagged range not found")
+    return flagged_range
+
+
+async def load_dataset_frame(db: AsyncSession, dataset_id: uuid.UUID) -> LoadedDatasetFrame:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    rows = (
+        await db.execute(
+            select(TimeseriesData.timestamp, TimeseriesData.values_json)
+            .where(TimeseriesData.dataset_id == dataset_id)
+            .order_by(TimeseriesData.timestamp.asc()),
+        )
+    ).all()
+
+    column_names = [column.name for column in dataset.columns]
+    records: list[dict[str, Any]] = []
+    for timestamp, values_json in rows:
+        record = {"timestamp": timestamp}
+        for column_name in column_names:
+            record[column_name] = values_json.get(column_name)
+        records.append(record)
+
+    if records:
+        frame = pd.DataFrame.from_records(records)
+        frame["timestamp"] = pd.to_datetime(frame["timestamp"], utc=True)
+        frame = frame.set_index("timestamp").sort_index()
+        frame = frame.apply(pd.to_numeric, errors="coerce")
+    else:
+        frame = pd.DataFrame(columns=column_names)
+        frame.index = pd.DatetimeIndex([], name="timestamp", tz="UTC")
+
+    return LoadedDatasetFrame(
+        dataset=dataset,
+        columns_by_id={column.id: column for column in dataset.columns},
+        frame=frame,
+    )
+
+
+def _expected_gap_tolerance(dataset: Dataset, frame: pd.DataFrame) -> timedelta:
+    if dataset.time_step_seconds:
+        return timedelta(seconds=max(dataset.time_step_seconds, 1) * 1.5)
+    if len(frame.index) > 1:
+        deltas = frame.index.to_series().diff().dropna()
+        if not deltas.empty:
+            median_delta = deltas.median()
+            return median_delta * 1.5
+    return timedelta(minutes=15)
+
+
+def _evaluate_rule(series: pd.Series, operator: str, value: Any) -> pd.Series:
+    if operator == "==":
+        return series == value
+    if operator == "!=":
+        return series != value
+    if operator == "<":
+        return series < value
+    if operator == ">":
+        return series > value
+    if operator == "<=":
+        return series <= value
+    if operator == ">=":
+        return series >= value
+    if operator == "between":
+        lower, upper = value
+        return series.between(lower, upper, inclusive="both")
+    if operator == "is_null":
+        return series.isna()
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Unsupported operator: {operator}")
+
+
+def _merge_mask_to_ranges(mask: pd.Series, tolerance: timedelta) -> list[tuple[datetime, datetime]]:
+    active_timestamps = [timestamp.to_pydatetime() for timestamp, is_flagged in mask.items() if bool(is_flagged)]
+    if not active_timestamps:
+        return []
+
+    merged: list[tuple[datetime, datetime]] = []
+    range_start = active_timestamps[0]
+    range_end = active_timestamps[0]
+
+    for timestamp in active_timestamps[1:]:
+        if timestamp - range_end <= tolerance:
+            range_end = timestamp
+            continue
+        merged.append((range_start, range_end))
+        range_start = timestamp
+        range_end = timestamp
+
+    merged.append((range_start, range_end))
+    return merged
+
+
+def serialize_rule(rule: FlagRule, columns_by_id: dict[uuid.UUID, DataColumn]) -> dict[str, Any]:
+    payload = dict(rule.rule_json)
+    column = columns_by_id.get(uuid.UUID(str(payload["column_id"]))) if payload.get("column_id") else None
+    payload["column_name"] = column.name if column else None
+    return payload
+
+
+async def apply_rules(db: AsyncSession, dataset_id: uuid.UUID, flag_id: uuid.UUID) -> list[FlaggedRange]:
+    loaded = await load_dataset_frame(db, dataset_id)
+    flag = await get_flag_or_404(db, flag_id)
+    if flag.dataset_id != dataset_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Flag does not belong to this dataset")
+    if not flag.rules:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Flag has no rules to apply")
+
+    if loaded.frame.empty:
+        await db.execute(delete(FlaggedRange).where(FlaggedRange.flag_id == flag_id, FlaggedRange.applied_by == "auto"))
+        await db.commit()
+        return []
+
+    combined_mask = pd.Series(True, index=loaded.frame.index, dtype=bool)
+    involved_column_ids: list[uuid.UUID] = []
+    for rule in flag.rules:
+        rule_json = rule.rule_json
+        column_id = uuid.UUID(str(rule_json["column_id"]))
+        column = loaded.columns_by_id.get(column_id)
+        if column is None:
+          raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rule references a missing dataset column")
+        series = loaded.frame[column.name]
+        combined_mask &= _evaluate_rule(series, str(rule_json["operator"]), rule_json.get("value")).fillna(False)
+        involved_column_ids.append(column_id)
+
+    tolerance = _expected_gap_tolerance(loaded.dataset, loaded.frame)
+    merged_ranges = _merge_mask_to_ranges(combined_mask, tolerance)
+
+    await db.execute(delete(FlaggedRange).where(FlaggedRange.flag_id == flag_id, FlaggedRange.applied_by == "auto"))
+    created_ranges: list[FlaggedRange] = []
+    for start_time, end_time in merged_ranges:
+        flagged_range = FlaggedRange(
+            flag_id=flag_id,
+            start_time=start_time,
+            end_time=end_time,
+            applied_by="auto",
+            column_ids=involved_column_ids or None,
+        )
+        db.add(flagged_range)
+        created_ranges.append(flagged_range)
+
+    await db.commit()
+    for flagged_range in created_ranges:
+        await db.refresh(flagged_range)
+    return created_ranges
