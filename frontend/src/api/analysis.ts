@@ -2,6 +2,8 @@ import { apiClient } from "./client";
 import type {
   AirDensityRequest,
   AirDensityResponse,
+  ExtremeWindRequest,
+  ExtremeWindResponse,
   ExtrapolateRequest,
   ExtrapolateResponse,
   HistogramRequest,
@@ -43,6 +45,11 @@ export async function getTurbulenceAnalysis(datasetId: string, payload: Turbulen
 
 export async function getAirDensityAnalysis(datasetId: string, payload: AirDensityRequest): Promise<AirDensityResponse> {
   const response = await apiClient.post<AirDensityResponse>(`/analysis/air-density/${datasetId}`, payload);
+  return response.data;
+}
+
+export async function getExtremeWindAnalysis(datasetId: string, payload: ExtremeWindRequest): Promise<ExtremeWindResponse> {
+  const response = await apiClient.post<ExtremeWindResponse>(`/analysis/extreme-wind/${datasetId}`, payload);
   return response.data;
 }
 

@@ -11,6 +11,7 @@ DEFAULT_SPEED_BIN_EDGES = [0.0, 3.0, 6.0, 9.0, 12.0, 15.0]
 DEFAULT_HISTOGRAM_BIN_COUNT = 30
 DEFAULT_WEIBULL_CURVE_POINTS = 160
 DEFAULT_TURBULENCE_BIN_WIDTH = 1.0
+DEFAULT_EXTREME_WIND_RETURN_PERIODS = [10.0, 20.0, 50.0, 100.0]
 WeibullMethod = Literal["mle", "moments"]
 ShearMethod = Literal["power", "log"]
 AirDensityPressureSource = Literal["auto", "measured", "estimated"]
@@ -305,6 +306,68 @@ class AirDensityResponse(BaseModel):
     summary: AirDensitySummaryResponse
     density_points: list[AirDensityPointResponse] = Field(default_factory=list)
     monthly: list[AirDensityMonthlyResponse] = Field(default_factory=list)
+
+
+class ExtremeWindRequest(BaseModel):
+    speed_column_id: uuid.UUID
+    gust_column_id: uuid.UUID | None = None
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    return_periods: Annotated[list[float], Field(default_factory=lambda: list(DEFAULT_EXTREME_WIND_RETURN_PERIODS), min_length=1)]
+    max_curve_points: Annotated[int, Field(default=80, ge=24, le=240)] = 80
+
+
+class ExtremeWindAnnualMaximumResponse(BaseModel):
+    year: int
+    timestamp: datetime | None = None
+    speed_max: float | None = None
+    gust_max: float | None = None
+    analysis_value: float | None = None
+
+
+class ExtremeWindReturnPeriodResponse(BaseModel):
+    return_period_years: float
+    speed: float | None = None
+    lower_ci: float | None = None
+    upper_ci: float | None = None
+
+
+class ExtremeWindObservedPointResponse(BaseModel):
+    year: int
+    rank: int
+    return_period_years: float
+    speed: float
+
+
+class ExtremeWindGumbelFitResponse(BaseModel):
+    location: float | None = None
+    scale: float | None = None
+    sample_count: int = 0
+
+
+class ExtremeWindSummaryResponse(BaseModel):
+    data_source: Literal["speed", "gust"] = "speed"
+    record_years: float = 0.0
+    annual_max_count: int = 0
+    ve10: float | None = None
+    ve20: float | None = None
+    ve50: float | None = None
+    ve100: float | None = None
+    gust_factor: float | None = None
+    short_record_warning: bool = False
+    warning_message: str | None = None
+
+
+class ExtremeWindResponse(BaseModel):
+    dataset_id: uuid.UUID
+    speed_column_id: uuid.UUID
+    gust_column_id: uuid.UUID | None = None
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    summary: ExtremeWindSummaryResponse
+    gumbel_fit: ExtremeWindGumbelFitResponse
+    annual_maxima: list[ExtremeWindAnnualMaximumResponse] = Field(default_factory=list)
+    return_periods: list[ExtremeWindReturnPeriodResponse] = Field(default_factory=list)
+    return_period_curve: list[ExtremeWindReturnPeriodResponse] = Field(default_factory=list)
+    observed_points: list[ExtremeWindObservedPointResponse] = Field(default_factory=list)
 
 
 class ExtrapolateRequest(BaseModel):

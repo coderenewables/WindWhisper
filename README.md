@@ -1,6 +1,6 @@
 # WindWhisper 🌬️
 
-WindWhisper is a comprehensive, open-source web application for wind resource assessment, built to rival proprietary solutions in the industry. It covers the full Wind Resource Assessment (WRA) workflow including importing raw data, performing Quality Control (QC), analyzing metrics (shear, turbulence, Weibull), adjusting long-term measurements, and visualizing the data.
+WindWhisper is aiming to be a comprehensive, open-source web application for wind resource assessment, built to cover the full Wind Resource Assessment (WRA) workflow with transparency and reproducibility. It includes importing raw data, performing Quality Control (QC), analyzing metrics (shear, turbulence, Weibull), adjusting long-term measurements, and visualizing the data.
 
 ## Project Architecture
 
@@ -24,8 +24,8 @@ Before you begin, ensure you have the following installed on your machine:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/coderenewables/wind-resource.git
-cd wind-resource
+git clone https://github.com/coderenewables/WindWhisper.git
+cd WindWhisper
 ```
 
 ### 2. Set up the Database
@@ -58,7 +58,7 @@ alembic upgrade head
 # Start the FastApi backend server
 uvicorn app.main:app --reload
 ```
-*The backend API will be available at http://localhost:8000. You can view the automated Swagger docs at http://localhost:8000/docs.*
+*The backend API will be available at http://localhost:8000. You can view the automated Swagger docs at http://localhost:8000/docs .*
 
 *Note for Windows/PowerShell users:* If `conda activate windwhisper` doesn't work out of the box, ensure you initialize the Conda hook first:
 `. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"`
@@ -77,7 +77,7 @@ npm install
 # Start the development server
 npm run dev
 ```
-*The frontend application will be hosted locally at http://localhost:5173.*
+*The frontend application will be hosted locally at http://localhost:5173 .*
 
 ---
 

@@ -14,6 +14,7 @@ const analysisMocks = vi.hoisted(() => ({
   getShearAnalysis: vi.fn(),
   getTurbulenceAnalysis: vi.fn(),
   getAirDensityAnalysis: vi.fn(),
+  getExtremeWindAnalysis: vi.fn(),
   createExtrapolatedChannel: vi.fn(),
   getWeibullAnalysis: vi.fn(),
 }));
@@ -34,6 +35,7 @@ vi.mock("../api/analysis", () => ({
   getShearAnalysis: analysisMocks.getShearAnalysis,
   getTurbulenceAnalysis: analysisMocks.getTurbulenceAnalysis,
   getAirDensityAnalysis: analysisMocks.getAirDensityAnalysis,
+  getExtremeWindAnalysis: analysisMocks.getExtremeWindAnalysis,
   getWeibullAnalysis: analysisMocks.getWeibullAnalysis,
 }));
 
@@ -66,11 +68,12 @@ const datasetDetail = {
   end_time: "2025-01-02T00:00:00Z",
   created_at: "2025-01-02T00:00:00Z",
   row_count: 144,
-  column_count: 6,
+  column_count: 7,
   columns: [
     { id: "dir-1", name: "Dir 80m", measurement_type: "direction", unit: "deg", height_m: 80, sensor_info: null },
     { id: "spd-1", name: "Speed 80m", measurement_type: "speed", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "spd-2", name: "Speed 60m", measurement_type: "speed", unit: "m/s", height_m: 60, sensor_info: null },
+    { id: "gst-1", name: "Gust 80m", measurement_type: "gust", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "sd-1", name: "Speed SD 80m", measurement_type: "speed_sd", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "tmp-1", name: "Temp 2m", measurement_type: "temperature", unit: "C", height_m: 2, sensor_info: null },
     { id: "prs-1", name: "Pressure hPa", measurement_type: "pressure", unit: "hPa", height_m: 2, sensor_info: null },
@@ -195,6 +198,44 @@ beforeEach(() => {
     ],
     monthly: [
       { month: 1, label: "Jan", mean_density: 1.224, mean_wind_power_density: 342, sample_count: 24 },
+    ],
+  });
+  analysisMocks.getExtremeWindAnalysis.mockResolvedValue({
+    dataset_id: "dataset-1",
+    speed_column_id: "spd-1",
+    gust_column_id: "gst-1",
+    excluded_flag_ids: [],
+    summary: {
+      data_source: "gust",
+      record_years: 5.1,
+      annual_max_count: 5,
+      ve10: 36.4,
+      ve20: 39.1,
+      ve50: 42.8,
+      ve100: 45.0,
+      gust_factor: 1.34,
+      short_record_warning: false,
+      warning_message: null,
+    },
+    gumbel_fit: { location: 28.4, scale: 3.2, sample_count: 5 },
+    annual_maxima: [
+      { year: 2020, timestamp: "2020-12-01T00:00:00Z", speed_max: 18.5, gust_max: 24.0, analysis_value: 24.0 },
+      { year: 2021, timestamp: "2021-12-01T00:00:00Z", speed_max: 19.8, gust_max: 25.7, analysis_value: 25.7 },
+    ],
+    return_periods: [
+      { return_period_years: 10, speed: 36.4, lower_ci: 31.5, upper_ci: 40.1 },
+      { return_period_years: 20, speed: 39.1, lower_ci: 33.2, upper_ci: 43.4 },
+      { return_period_years: 50, speed: 42.8, lower_ci: 35.9, upper_ci: 47.8 },
+      { return_period_years: 100, speed: 45.0, lower_ci: 37.1, upper_ci: 50.5 },
+    ],
+    return_period_curve: [
+      { return_period_years: 2, speed: 28.0, lower_ci: null, upper_ci: null },
+      { return_period_years: 10, speed: 36.4, lower_ci: null, upper_ci: null },
+      { return_period_years: 50, speed: 42.8, lower_ci: null, upper_ci: null },
+    ],
+    observed_points: [
+      { year: 2020, rank: 2, return_period_years: 3, speed: 24.0 },
+      { year: 2021, rank: 1, return_period_years: 6, speed: 25.7 },
     ],
   });
   analysisMocks.createExtrapolatedChannel.mockResolvedValue({
@@ -344,4 +385,23 @@ test("requests air density analysis when the air density tab is opened", async (
   await screen.findByText(/density and wind power density/i);
   await screen.findByText(/^1.224 kg\/m³$/i, { selector: "div" });
   await screen.findByText(/^342 w\/m²$/i, { selector: "div" });
+});
+
+test("requests extreme wind analysis when the extreme wind tab is opened", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/wind rose chart stub/i);
+  await user.click(screen.getByRole("button", { name: /extreme wind/i }));
+
+  await waitFor(() => {
+    expect(analysisMocks.getExtremeWindAnalysis).toHaveBeenCalledWith("dataset-1", {
+      speed_column_id: "spd-1",
+      gust_column_id: "gst-1",
+      exclude_flags: [],
+    });
+  });
+
+  await screen.findByText(/extreme wind return periods/i);
+  await screen.findByText(/^42.8 m\/s$/i, { selector: "div" });
 });

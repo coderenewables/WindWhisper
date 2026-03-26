@@ -31,7 +31,7 @@ const seededDatasetSummary = {
   end_time: "2025-03-01T00:30:00Z",
   created_at: "2025-03-01T00:40:00Z",
   row_count: 4,
-  column_count: 3,
+  column_count: 7,
 };
 
 const seededDatasetDetail = {
@@ -40,6 +40,7 @@ const seededDatasetDetail = {
     { id: "dir-80m", name: "Dir 80m", measurement_type: "direction", unit: "deg", height_m: 80, sensor_info: null },
     { id: "spd-80m", name: "Speed 80m", measurement_type: "speed", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "spd-60m", name: "Speed 60m", measurement_type: "speed", unit: "m/s", height_m: 60, sensor_info: null },
+    { id: "gst-80m", name: "Gust 80m", measurement_type: "gust", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "sd-80m", name: "Speed SD 80m", measurement_type: "speed_sd", unit: "m/s", height_m: 80, sensor_info: null },
     { id: "temp-2m", name: "Temp 2m", measurement_type: "temperature", unit: "C", height_m: 2, sensor_info: null },
     { id: "press-2m", name: "Pressure hPa", measurement_type: "pressure", unit: "hPa", height_m: 2, sensor_info: null },
@@ -59,10 +60,10 @@ const seededFlags = [
 ];
 
 const seededRows = [
-  { timestamp: "2025-03-01T00:00:00Z", direction: 350, speed: 5, temp: 7, pressure: 1013.2 },
-  { timestamp: "2025-03-01T00:10:00Z", direction: 10, speed: 7, temp: 6, pressure: 1012.4 },
-  { timestamp: "2025-03-01T00:20:00Z", direction: 95, speed: 8, temp: 5, pressure: 1011.9 },
-  { timestamp: "2025-03-01T00:30:00Z", direction: 185, speed: 9, temp: 4, pressure: 1010.8 },
+  { timestamp: "2025-03-01T00:00:00Z", direction: 350, speed: 5, gust: 7.2, temp: 7, pressure: 1013.2 },
+  { timestamp: "2025-03-01T00:10:00Z", direction: 10, speed: 7, gust: 9.4, temp: 6, pressure: 1012.4 },
+  { timestamp: "2025-03-01T00:20:00Z", direction: 95, speed: 8, gust: 10.8, temp: 5, pressure: 1011.9 },
+  { timestamp: "2025-03-01T00:30:00Z", direction: 185, speed: 9, gust: 12.6, temp: 4, pressure: 1010.8 },
 ];
 
 const excludedTimestamps = new Set(["2025-03-01T00:30:00Z"]);
@@ -340,6 +341,58 @@ function buildAirDensityResponse(payload: Record<string, unknown>) {
   };
 }
 
+function buildExtremeWindResponse(payload: Record<string, unknown>) {
+  const useGust = Boolean(payload.gust_column_id);
+  const extremeValues = seededRows.map((row) => (useGust ? row.gust : row.speed));
+  return {
+    dataset_id: seededDatasetSummary.id,
+    speed_column_id: String(payload.speed_column_id),
+    gust_column_id: payload.gust_column_id ? String(payload.gust_column_id) : null,
+    excluded_flag_ids: Array.isArray(payload.exclude_flags) ? payload.exclude_flags : [],
+    summary: {
+      data_source: useGust ? "gust" : "speed",
+      record_years: 0.08,
+      annual_max_count: 1,
+      ve10: useGust ? 17.8 : 12.9,
+      ve20: useGust ? 19.0 : 13.8,
+      ve50: useGust ? 20.7 : 15.0,
+      ve100: useGust ? 21.9 : 15.9,
+      gust_factor: useGust ? 1.4 : null,
+      short_record_warning: true,
+      warning_message: "Record shorter than one year. Extreme-wind estimates are indicative only.",
+    },
+    gumbel_fit: {
+      location: useGust ? 11.8 : 8.7,
+      scale: useGust ? 2.1 : 1.4,
+      sample_count: 1,
+    },
+    annual_maxima: [
+      {
+        year: 2025,
+        timestamp: seededRows[3].timestamp,
+        speed_max: Math.max(...seededRows.map((row) => row.speed)),
+        gust_max: Math.max(...seededRows.map((row) => row.gust)),
+        analysis_value: Math.max(...extremeValues),
+      },
+    ],
+    return_periods: [
+      { return_period_years: 10, speed: useGust ? 17.8 : 12.9, lower_ci: 15.5, upper_ci: 19.6 },
+      { return_period_years: 20, speed: useGust ? 19.0 : 13.8, lower_ci: 16.3, upper_ci: 20.8 },
+      { return_period_years: 50, speed: useGust ? 20.7 : 15.0, lower_ci: 17.4, upper_ci: 22.7 },
+      { return_period_years: 100, speed: useGust ? 21.9 : 15.9, lower_ci: 18.2, upper_ci: 24.0 },
+    ],
+    return_period_curve: [
+      { return_period_years: 2, speed: useGust ? 13.5 : 9.6, lower_ci: null, upper_ci: null },
+      { return_period_years: 10, speed: useGust ? 17.8 : 12.9, lower_ci: null, upper_ci: null },
+      { return_period_years: 50, speed: useGust ? 20.7 : 15.0, lower_ci: null, upper_ci: null },
+      { return_period_years: 100, speed: useGust ? 21.9 : 15.9, lower_ci: null, upper_ci: null },
+    ],
+    observed_points: [
+      { year: 2025, rank: 1, return_period_years: 2, speed: Math.max(...extremeValues) },
+    ],
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={[`/analysis?projectId=${seededProject.id}&datasetId=${seededDatasetSummary.id}`]}>
@@ -395,6 +448,9 @@ beforeEach(() => {
     }
     if (url === `/analysis/air-density/${seededDatasetSummary.id}`) {
       return makeResponse(buildAirDensityResponse(payload as Record<string, unknown>));
+    }
+    if (url === `/analysis/extreme-wind/${seededDatasetSummary.id}`) {
+      return makeResponse(buildExtremeWindResponse(payload as Record<string, unknown>));
     }
     if (url === `/analysis/extrapolate/${seededDatasetSummary.id}`) {
       return makeResponse({
@@ -529,6 +585,26 @@ test("renders air density analysis using seeded backend data", async () => {
       pressure_column_id: "press-2m",
       pressure_source: "auto",
       elevation_m: 12,
+      exclude_flags: [],
+    });
+  });
+});
+
+test("renders extreme wind analysis using seeded backend data", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/samples used/i);
+  await user.click(screen.getByRole("button", { name: /extreme wind/i }));
+
+  await screen.findByText(/extreme wind return periods/i);
+  await screen.findByText(/record shorter than one year/i);
+  await screen.findByText(/annual maxima/i, { selector: "h3" });
+
+  await waitFor(() => {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/extreme-wind/${seededDatasetSummary.id}`, {
+      speed_column_id: "spd-80m",
+      gust_column_id: "gst-80m",
       exclude_flags: [],
     });
   });

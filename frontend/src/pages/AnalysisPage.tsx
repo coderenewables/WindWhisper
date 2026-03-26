@@ -2,8 +2,9 @@ import { AlertTriangle, BarChart3, Compass, GaugeCircle, ShieldCheck, Wind } fro
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { createExtrapolatedChannel, getAirDensityAnalysis, getHistogramAnalysis, getShearAnalysis, getTurbulenceAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
+import { createExtrapolatedChannel, getAirDensityAnalysis, getExtremeWindAnalysis, getHistogramAnalysis, getShearAnalysis, getTurbulenceAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
 import { AirDensityPanel } from "../components/analysis/AirDensityPanel";
+import { ExtremeWindPanel } from "../components/analysis/ExtremeWindPanel";
 import { FrequencyHistogram } from "../components/analysis/FrequencyHistogram";
 import { TurbulencePanel } from "../components/analysis/TurbulencePanel";
 import { WindShearPanel } from "../components/analysis/WindShearPanel";
@@ -12,7 +13,7 @@ import { listFlags } from "../api/qc";
 import { WindRoseChart } from "../components/analysis/WindRoseChart";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { useProjectStore } from "../stores/projectStore";
-import type { AirDensityPressureSource, AirDensityResponse, HistogramRequest, HistogramResponse, ShearMethod, ShearResponse, TurbulenceResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
+import type { AirDensityPressureSource, AirDensityResponse, ExtremeWindResponse, HistogramRequest, HistogramResponse, ShearMethod, ShearResponse, TurbulenceResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
 import type { DatasetColumn, DatasetDetail, DatasetSummary } from "../types/dataset";
 import type { Flag } from "../types/qc";
 
@@ -24,7 +25,7 @@ const analysisTabs: Array<{ id: AnalysisTab; label: string; description: string 
   { id: "shear", label: "Shear", description: "Vertical profile, directional shear, and target-height extrapolation." },
   { id: "turbulence", label: "Turbulence", description: "IEC turbulence intensity analysis by speed bin and direction." },
   { id: "air-density", label: "Air Density", description: "Density and wind power density from measured or estimated pressure." },
-  { id: "extreme-wind", label: "Extreme Wind", description: "Return-period and Gumbel analysis is queued after core charts." },
+  { id: "extreme-wind", label: "Extreme Wind", description: "Annual maxima, Gumbel fit, and long-return wind speeds." },
 ];
 
 function getDefaultDirectionColumn(columns: DatasetColumn[]) {
@@ -74,6 +75,7 @@ export function AnalysisPage() {
   const [shearData, setShearData] = useState<ShearResponse | null>(null);
   const [turbulenceData, setTurbulenceData] = useState<TurbulenceResponse | null>(null);
   const [airDensityData, setAirDensityData] = useState<AirDensityResponse | null>(null);
+  const [extremeWindData, setExtremeWindData] = useState<ExtremeWindResponse | null>(null);
   const [weibullData, setWeibullData] = useState<WeibullResponse | null>(null);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
   const [isLoadingDatasetDetail, setIsLoadingDatasetDetail] = useState(false);
@@ -83,6 +85,7 @@ export function AnalysisPage() {
   const [isLoadingShear, setIsLoadingShear] = useState(false);
   const [isLoadingTurbulence, setIsLoadingTurbulence] = useState(false);
   const [isLoadingAirDensity, setIsLoadingAirDensity] = useState(false);
+  const [isLoadingExtremeWind, setIsLoadingExtremeWind] = useState(false);
   const [isLoadingWeibull, setIsLoadingWeibull] = useState(false);
   const [isCreatingExtrapolatedChannel, setIsCreatingExtrapolatedChannel] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -91,6 +94,7 @@ export function AnalysisPage() {
   const [shearError, setShearError] = useState<string | null>(null);
   const [turbulenceError, setTurbulenceError] = useState<string | null>(null);
   const [airDensityError, setAirDensityError] = useState<string | null>(null);
+  const [extremeWindError, setExtremeWindError] = useState<string | null>(null);
   const [weibullError, setWeibullError] = useState<string | null>(null);
   const [createChannelError, setCreateChannelError] = useState<string | null>(null);
   const [createdChannelName, setCreatedChannelName] = useState<string | null>(null);
@@ -106,6 +110,8 @@ export function AnalysisPage() {
   const [selectedAirTemperatureColumnId, setSelectedAirTemperatureColumnId] = useState("");
   const [selectedAirPressureColumnId, setSelectedAirPressureColumnId] = useState("");
   const [selectedAirSpeedColumnId, setSelectedAirSpeedColumnId] = useState("");
+  const [selectedExtremeSpeedColumnId, setSelectedExtremeSpeedColumnId] = useState("");
+  const [selectedExtremeGustColumnId, setSelectedExtremeGustColumnId] = useState("");
   const [airPressureSource, setAirPressureSource] = useState<AirDensityPressureSource>("auto");
   const [airElevation, setAirElevation] = useState("");
   const { projects, fetchProjects } = useProjectStore();
@@ -169,12 +175,15 @@ export function AnalysisPage() {
       setSelectedAirTemperatureColumnId("");
       setSelectedAirPressureColumnId("");
       setSelectedAirSpeedColumnId("");
+      setSelectedExtremeSpeedColumnId("");
+      setSelectedExtremeGustColumnId("");
       setAirElevation("");
       setRoseData(null);
       setHistogramData(null);
       setShearData(null);
       setTurbulenceData(null);
       setAirDensityData(null);
+      setExtremeWindData(null);
       setWeibullData(null);
       return;
     }
@@ -205,6 +214,8 @@ export function AnalysisPage() {
         setSelectedAirTemperatureColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "temperature")?.id ?? ""));
         setSelectedAirPressureColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "pressure")?.id ?? ""));
         setSelectedAirSpeedColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "speed")?.id ?? ""));
+        setSelectedExtremeSpeedColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "speed")?.id ?? ""));
+        setSelectedExtremeGustColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "gust")?.id ?? ""));
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -240,6 +251,10 @@ export function AnalysisPage() {
   );
   const pressureColumns = useMemo(
     () => datasetDetail?.columns.filter((column) => column.measurement_type === "pressure") ?? [],
+    [datasetDetail],
+  );
+  const gustColumns = useMemo(
+    () => datasetDetail?.columns.filter((column) => column.measurement_type === "gust") ?? [],
     [datasetDetail],
   );
   const selectedHistogramColumn = useMemo(
@@ -472,6 +487,40 @@ export function AnalysisPage() {
   }, [activeTab, airPressureSource, datasetId, excludedFlagIds, parsedAirElevation, selectedAirPressureColumnId, selectedAirSpeedColumnId, selectedAirTemperatureColumnId]);
 
   useEffect(() => {
+    if (activeTab !== "extreme-wind" || !datasetId || !selectedExtremeSpeedColumnId) {
+      setExtremeWindError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingExtremeWind(true);
+    setExtremeWindError(null);
+
+    void getExtremeWindAnalysis(datasetId, {
+      speed_column_id: selectedExtremeSpeedColumnId,
+      gust_column_id: selectedExtremeGustColumnId || undefined,
+      exclude_flags: excludedFlagIds,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setExtremeWindData(response);
+          setIsLoadingExtremeWind(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setExtremeWindData(null);
+          setExtremeWindError(error instanceof Error ? error.message : "Unable to calculate extreme wind return periods");
+          setIsLoadingExtremeWind(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetId, excludedFlagIds, selectedExtremeGustColumnId, selectedExtremeSpeedColumnId]);
+
+  useEffect(() => {
     if (activeTab !== "histogram" || !datasetId || !histogramRequest) {
       setHistogramError(null);
       return;
@@ -614,12 +663,12 @@ export function AnalysisPage() {
       <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.95fr)] xl:items-end">
           <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Tasks 14-19</span>
+            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Tasks 14-20</span>
             <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Explore directional behaviour, distributions, shear, turbulence, and air density inside a QC-aware analysis workspace.
+              Explore directional behaviour, distributions, shear, turbulence, density, and extreme wind inside a QC-aware analysis workspace.
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
-              Choose a dataset, then move between wind roses, distributions, shear, IEC turbulence, and density views without leaving the same cleaned-data context.
+              Choose a dataset, then move between wind roses, distributions, shear, IEC turbulence, density, and return-period views without leaving the same cleaned-data context.
             </p>
           </div>
 
@@ -1135,6 +1184,70 @@ export function AnalysisPage() {
                   <section className="panel-surface p-8 text-sm text-ink-600">Select temperature and wind-speed inputs to calculate air density and wind power density.</section>
                 ) : (
                   <AirDensityPanel data={airDensityData} isLoading={isLoadingAirDensity} error={airDensityError} />
+                )}
+              </div>
+            </section>
+          ) : activeTab === "extreme-wind" ? (
+            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="space-y-4">
+                <section className="panel-surface p-5">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
+                  <div className="mt-4 space-y-4">
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Mean speed column
+                      <select value={selectedExtremeSpeedColumnId} onChange={(event) => setSelectedExtremeSpeedColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={turbulenceSpeedColumns.length === 0}>
+                        <option value="">Select a speed column</option>
+                        {turbulenceSpeedColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Gust column
+                      <select value={selectedExtremeGustColumnId} onChange={(event) => setSelectedExtremeGustColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={gustColumns.length === 0}>
+                        <option value="">No gust column</option>
+                        {gustColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="panel-surface p-5">
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
+                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
+                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
+                  {!isLoadingFlags && flags.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {flags.map((flag) => {
+                        const excluded = excludedFlagIds.includes(flag.id);
+                        return (
+                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
+                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
+                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
+                            <span className="flex-1 text-sm text-ink-700">
+                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
+                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
+              </aside>
+
+              <div className="space-y-4">
+                {!selectedExtremeSpeedColumnId ? (
+                  <section className="panel-surface p-8 text-sm text-ink-600">Select a mean wind-speed column to estimate annual maxima and return-period extremes.</section>
+                ) : (
+                  <ExtremeWindPanel data={extremeWindData} isLoading={isLoadingExtremeWind} error={extremeWindError} />
                 )}
               </div>
             </section>

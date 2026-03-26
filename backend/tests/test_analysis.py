@@ -478,3 +478,67 @@ async def test_air_density_endpoint_can_estimate_pressure_from_project_elevation
     assert payload["summary"]["estimated_pressure_hpa"] is not None
     assert payload["summary"]["elevation_m"] == 450
     assert payload["summary"]["mean_density"] is not None
+
+
+async def test_extreme_wind_endpoint_returns_return_periods_and_gust_factor(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="Extreme Wind Site")
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2020, 1, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Extreme Wind Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=datetime(2024, 12, 31, 0, 0, tzinfo=UTC),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    gust_column = DataColumn(dataset_id=dataset.id, name="Gust_80m", measurement_type="gust", height_m=80)
+    db_session.add_all([speed_column, gust_column])
+    await db_session.flush()
+
+    annual_speed_maxima = [18.5, 19.8, 21.4, 22.1, 23.0]
+    annual_gust_maxima = [24.0, 25.7, 27.3, 28.9, 30.8]
+    for index, year in enumerate(range(2020, 2025)):
+        db_session.add(
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=datetime(year, 1, 15, 0, 0, tzinfo=UTC),
+                values_json={"Speed_80m": annual_speed_maxima[index] - 4.0, "Gust_80m": annual_gust_maxima[index] - 5.0},
+            ),
+        )
+        db_session.add(
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=datetime(year, 12, 1, 0, 0, tzinfo=UTC),
+                values_json={"Speed_80m": annual_speed_maxima[index], "Gust_80m": annual_gust_maxima[index]},
+            ),
+        )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/extreme-wind/{dataset.id}",
+        json={
+            "speed_column_id": str(speed_column.id),
+            "gust_column_id": str(gust_column.id),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["data_source"] == "gust"
+    assert payload["summary"]["annual_max_count"] == 5
+    assert payload["summary"]["short_record_warning"] is False
+    assert payload["summary"]["gust_factor"] > 1.0
+    assert payload["summary"]["ve50"] is not None
+    assert payload["summary"]["ve50"] > max(annual_gust_maxima)
+    assert payload["gumbel_fit"]["scale"] > 0
+    assert len(payload["annual_maxima"]) == 5
+    assert len(payload["return_periods"]) == 4
+    assert len(payload["return_period_curve"]) >= 24
+    assert len(payload["observed_points"]) == 5

@@ -18,6 +18,13 @@ from app.schemas.analysis import (
     AirDensityRequest,
     AirDensityResponse,
     AirDensitySummaryResponse,
+    ExtremeWindAnnualMaximumResponse,
+    ExtremeWindGumbelFitResponse,
+    ExtremeWindObservedPointResponse,
+    ExtremeWindRequest,
+    ExtremeWindResponse,
+    ExtremeWindReturnPeriodResponse,
+    ExtremeWindSummaryResponse,
     ExtrapolatedColumnResponse,
     ExtrapolateRequest,
     ExtrapolateResponse,
@@ -50,6 +57,7 @@ from app.schemas.analysis import (
     WindRoseSpeedBinResponse,
 )
 from app.services.air_density import air_density_summary, build_density_points, calculate_air_density, estimate_pressure_from_elevation, monthly_averages, wind_power_density
+from app.services.extreme_wind import extreme_wind_summary
 from app.services.qc_engine import filter_flagged_data, get_clean_dataframe, get_dataset_or_404, load_dataset_frame
 from app.services.turbulence import build_scatter_points, calculate_ti, iec_reference_curves, ti_by_direction, ti_by_speed_bin, ti_summary
 from app.services.weibull import fit_weibull, weibull_pdf
@@ -625,6 +633,59 @@ async def create_air_density_analysis(
         ),
         density_points=[AirDensityPointResponse(**point) for point in density_points],
         monthly=[AirDensityMonthlyResponse(**row) for row in monthly_rows],
+    )
+
+
+@router.post("/extreme-wind/{dataset_id}", response_model=ExtremeWindResponse)
+async def create_extreme_wind_analysis(
+    dataset_id: uuid.UUID,
+    payload: ExtremeWindRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ExtremeWindResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    speed_column = _resolve_column(dataset.columns, payload.speed_column_id, "speed_column_id")
+    gust_column = _resolve_column(dataset.columns, payload.gust_column_id, "gust_column_id") if payload.gust_column_id is not None else None
+
+    if speed_column.measurement_type != "speed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="speed_column_id must reference a wind speed column")
+    if gust_column is not None and gust_column.measurement_type != "gust":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="gust_column_id must reference a gust column")
+
+    column_ids = [speed_column.id]
+    if gust_column is not None:
+        column_ids.append(gust_column.id)
+
+    frame = await get_clean_dataframe(db, dataset.id, column_ids=column_ids, exclude_flag_ids=payload.exclude_flags)
+    if frame.empty:
+        return ExtremeWindResponse(
+            dataset_id=dataset.id,
+            speed_column_id=speed_column.id,
+            gust_column_id=gust_column.id if gust_column is not None else None,
+            excluded_flag_ids=payload.exclude_flags,
+            summary=ExtremeWindSummaryResponse(data_source="gust" if gust_column is not None else "speed"),
+            gumbel_fit=ExtremeWindGumbelFitResponse(),
+        )
+
+    speed_series = pd.to_numeric(frame[speed_column.name], errors="coerce")
+    gust_series = pd.to_numeric(frame[gust_column.name], errors="coerce") if gust_column is not None else None
+    summary = extreme_wind_summary(
+        speed_series,
+        gust_series,
+        return_periods=payload.return_periods,
+        max_curve_points=payload.max_curve_points,
+    )
+
+    return ExtremeWindResponse(
+        dataset_id=dataset.id,
+        speed_column_id=speed_column.id,
+        gust_column_id=gust_column.id if gust_column is not None else None,
+        excluded_flag_ids=payload.exclude_flags,
+        summary=ExtremeWindSummaryResponse(**summary["summary"]),
+        gumbel_fit=ExtremeWindGumbelFitResponse(**summary["gumbel_fit"]),
+        annual_maxima=[ExtremeWindAnnualMaximumResponse(**row) for row in summary["annual_maxima"]],
+        return_periods=[ExtremeWindReturnPeriodResponse(**row) for row in summary["return_periods"]],
+        return_period_curve=[ExtremeWindReturnPeriodResponse(**row) for row in summary["return_period_curve"]],
+        observed_points=[ExtremeWindObservedPointResponse(**row) for row in summary["observed_points"]],
     )
 
 

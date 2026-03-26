@@ -289,6 +289,68 @@ export interface AirDensityResponse {
   monthly: AirDensityMonthly[];
 }
 
+export interface ExtremeWindRequest {
+  speed_column_id: string;
+  gust_column_id?: string;
+  exclude_flags?: string[];
+  return_periods?: number[];
+  max_curve_points?: number;
+}
+
+export interface ExtremeWindAnnualMaximum {
+  year: number;
+  timestamp: string | null;
+  speed_max: number | null;
+  gust_max: number | null;
+  analysis_value: number | null;
+}
+
+export interface ExtremeWindReturnPeriod {
+  return_period_years: number;
+  speed: number | null;
+  lower_ci: number | null;
+  upper_ci: number | null;
+}
+
+export interface ExtremeWindObservedPoint {
+  year: number;
+  rank: number;
+  return_period_years: number;
+  speed: number;
+}
+
+export interface ExtremeWindGumbelFit {
+  location: number | null;
+  scale: number | null;
+  sample_count: number;
+}
+
+export interface ExtremeWindSummary {
+  data_source: "speed" | "gust";
+  record_years: number;
+  annual_max_count: number;
+  ve10: number | null;
+  ve20: number | null;
+  ve50: number | null;
+  ve100: number | null;
+  gust_factor: number | null;
+  short_record_warning: boolean;
+  warning_message: string | null;
+}
+
+export interface ExtremeWindResponse {
+  dataset_id: string;
+  speed_column_id: string;
+  gust_column_id: string | null;
+  excluded_flag_ids: string[];
+  summary: ExtremeWindSummary;
+  gumbel_fit: ExtremeWindGumbelFit;
+  annual_maxima: ExtremeWindAnnualMaximum[];
+  return_periods: ExtremeWindReturnPeriod[];
+  return_period_curve: ExtremeWindReturnPeriod[];
+  observed_points: ExtremeWindObservedPoint[];
+}
+
 export interface ExtrapolatedColumn {
   id: string;
   name: string;
