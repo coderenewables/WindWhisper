@@ -15,12 +15,17 @@ from app.schemas.analysis import (
     HistogramRequest,
     HistogramResponse,
     HistogramStatsResponse,
+    WeibullCurvePointResponse,
+    WeibullFitResponse,
+    WeibullRequest,
+    WeibullResponse,
     WindRoseRequest,
     WindRoseResponse,
     WindRoseSectorResponse,
     WindRoseSpeedBinResponse,
 )
 from app.services.qc_engine import filter_flagged_data, get_clean_dataframe, get_dataset_or_404, load_dataset_frame
+from app.services.weibull import fit_weibull, weibull_pdf
 
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
@@ -76,6 +81,25 @@ def _serialize_histogram_stats(series: pd.Series, raw_count: int) -> HistogramSt
     )
 
 
+def _coerce_numeric_series(frame: pd.DataFrame, column_name: str) -> pd.Series:
+    if column_name not in frame.columns:
+        return pd.Series(dtype=float)
+    return pd.to_numeric(frame[column_name], errors="coerce").dropna().astype(float)
+
+
+async def _load_clean_numeric_series(
+    db: AsyncSession,
+    dataset_id: uuid.UUID,
+    column: DataColumn,
+    exclude_flag_ids: list[uuid.UUID],
+) -> tuple[pd.Series, pd.Series]:
+    loaded = await load_dataset_frame(db, dataset_id, column_ids=[column.id])
+    raw_series = _coerce_numeric_series(loaded.frame, column.name)
+    filtered_frame = await filter_flagged_data(db, loaded.frame, dataset_id, loaded.columns_by_id, exclude_flag_ids)
+    clean_series = _coerce_numeric_series(filtered_frame, column.name)
+    return raw_series, clean_series
+
+
 def _resolve_histogram_edges(series: pd.Series, payload: HistogramRequest) -> np.ndarray:
     lower_bound = payload.min_val if payload.min_val is not None else float(series.min())
     upper_bound = payload.max_val if payload.max_val is not None else float(series.max())
@@ -102,6 +126,15 @@ def _resolve_histogram_edges(series: pd.Series, payload: HistogramRequest) -> np
         return np.array([lower_bound, lower_bound + 1.0], dtype=float)
 
     return np.histogram_bin_edges(series.to_numpy(dtype=float), bins=payload.num_bins, range=(lower_bound, upper_bound))
+
+
+def _apply_numeric_bounds(series: pd.Series, minimum: float | None, maximum: float | None) -> pd.Series:
+    bounded = series
+    if minimum is not None:
+        bounded = bounded.loc[bounded >= minimum]
+    if maximum is not None:
+        bounded = bounded.loc[bounded <= maximum]
+    return bounded
 
 
 @router.post("/wind-rose/{dataset_id}", response_model=WindRoseResponse)
@@ -203,17 +236,10 @@ async def create_histogram(
     dataset = await get_dataset_or_404(db, dataset_id)
     column = _resolve_column(dataset.columns, payload.column_id, "column_id")
 
-    loaded = await load_dataset_frame(db, dataset.id, column_ids=[column.id])
-    raw_series = loaded.frame[column.name] if column.name in loaded.frame.columns else pd.Series(dtype=float)
-    filtered_frame = await filter_flagged_data(db, loaded.frame, dataset.id, loaded.columns_by_id, payload.exclude_flags)
-    clean_series = filtered_frame[column.name].dropna().astype(float) if column.name in filtered_frame.columns else pd.Series(dtype=float)
+    raw_series, clean_series = await _load_clean_numeric_series(db, dataset.id, column, payload.exclude_flags)
+    clean_series = _apply_numeric_bounds(clean_series, payload.min_val, payload.max_val)
 
-    if payload.min_val is not None:
-        clean_series = clean_series.loc[clean_series >= payload.min_val]
-    if payload.max_val is not None:
-        clean_series = clean_series.loc[clean_series <= payload.max_val]
-
-    raw_count = int(raw_series.dropna().count())
+    raw_count = int(raw_series.count())
     stats = _serialize_histogram_stats(clean_series, raw_count)
     if clean_series.empty:
         return HistogramResponse(
@@ -244,4 +270,52 @@ async def create_histogram(
         excluded_flag_ids=payload.exclude_flags,
         bins=bins,
         stats=stats,
+    )
+
+
+@router.post("/weibull/{dataset_id}", response_model=WeibullResponse)
+async def create_weibull_fit(
+    dataset_id: uuid.UUID,
+    payload: WeibullRequest,
+    db: AsyncSession = Depends(get_db),
+) -> WeibullResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    column = _resolve_column(dataset.columns, payload.column_id, "column_id")
+
+    if column.measurement_type != "speed":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Weibull fitting is only available for wind speed columns",
+        )
+
+    _, clean_series = await _load_clean_numeric_series(db, dataset.id, column, payload.exclude_flags)
+    clean_series = _apply_numeric_bounds(clean_series, payload.min_val, payload.max_val)
+    positive_series = clean_series.loc[clean_series > 0]
+
+    if positive_series.shape[0] < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="At least two positive wind speed samples are required for a Weibull fit",
+        )
+
+    fit = fit_weibull(positive_series.to_numpy(dtype=float), method=payload.method)
+    edges = _resolve_histogram_edges(positive_series, payload)
+    point_count = max(payload.curve_points, len(edges) * 4)
+    x_values = np.linspace(float(edges[0]), float(edges[-1]), point_count, dtype=float)
+    pdf_values = weibull_pdf(x_values, float(fit["k"]), float(fit["A"]))
+    representative_width = float(np.mean(np.diff(edges))) if len(edges) > 1 else 1.0
+
+    return WeibullResponse(
+        dataset_id=dataset.id,
+        column_id=column.id,
+        excluded_flag_ids=payload.exclude_flags,
+        fit=WeibullFitResponse(**fit),
+        curve_points=[
+            WeibullCurvePointResponse(
+                x=float(x_value),
+                pdf=float(pdf_value),
+                frequency_pct=float(pdf_value * representative_width * 100.0),
+            )
+            for x_value, pdf_value in zip(x_values, pdf_values, strict=False)
+        ],
     )

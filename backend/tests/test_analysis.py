@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import numpy as np
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -138,3 +139,61 @@ async def test_histogram_endpoint_returns_bins_and_stats(client: AsyncClient, db
     assert round(payload["stats"]["data_recovery_pct"], 2) == 75.0
     assert len(payload["bins"]) == 4
     assert [bin_entry["count"] for bin_entry in payload["bins"]] == [1, 0, 1, 1]
+
+
+async def test_weibull_endpoint_returns_fit_parameters_and_curve(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="Weibull Site")
+    db_session.add(project)
+    await db_session.flush()
+
+    rng = np.random.default_rng(42)
+    sampled_speeds = rng.weibull(2.0, 360) * 7.0
+    start_time = datetime(2025, 4, 1, 0, 0, tzinfo=UTC)
+
+    dataset = Dataset(
+        project_id=project.id,
+        name="Weibull Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=(len(sampled_speeds) - 1) * 10),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add(speed_column)
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(minutes=index * 10),
+                values_json={"Speed_80m": float(speed)},
+            )
+            for index, speed in enumerate(sampled_speeds)
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/weibull/{dataset.id}",
+        json={
+            "column_id": str(speed_column.id),
+            "num_bins": 24,
+            "method": "mle",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+
+    assert payload["column_id"] == str(speed_column.id)
+    assert payload["fit"]["method"] == "mle"
+    assert abs(payload["fit"]["k"] - 2.0) < 0.35
+    assert abs(payload["fit"]["A"] - 7.0) < 0.75
+    assert payload["fit"]["r_squared"] > 0.94
+    assert payload["fit"]["ks_stat"] < 0.08
+    assert len(payload["curve_points"]) >= 96
+    assert max(point["frequency_pct"] for point in payload["curve_points"]) > 0

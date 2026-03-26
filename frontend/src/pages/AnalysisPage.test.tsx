@@ -11,6 +11,7 @@ const analysisMocks = vi.hoisted(() => ({
   listFlags: vi.fn(),
   getWindRoseAnalysis: vi.fn(),
   getHistogramAnalysis: vi.fn(),
+  getWeibullAnalysis: vi.fn(),
 }));
 
 vi.mock("../api/datasets", () => ({
@@ -25,6 +26,7 @@ vi.mock("../api/qc", () => ({
 vi.mock("../api/analysis", () => ({
   getWindRoseAnalysis: analysisMocks.getWindRoseAnalysis,
   getHistogramAnalysis: analysisMocks.getHistogramAnalysis,
+  getWeibullAnalysis: analysisMocks.getWeibullAnalysis,
 }));
 
 vi.mock("../stores/projectStore", () => ({
@@ -105,6 +107,17 @@ beforeEach(() => {
     bins: [{ lower: 0, upper: 5, count: 5, frequency_pct: 50 }],
     stats: { mean: 5.5, std: 1.2, min: 2, max: 8, median: 5, count: 10, data_recovery_pct: 83.3 },
   });
+  analysisMocks.getWeibullAnalysis.mockResolvedValue({
+    dataset_id: "dataset-1",
+    column_id: "spd-1",
+    excluded_flag_ids: [],
+    fit: { method: "mle", k: 2.01, A: 7.1, mean_speed: 6.3, mean_power_density: 288.1, r_squared: 0.981, rmse: 0.024, ks_stat: 0.059 },
+    curve_points: [
+      { x: 0, pdf: 0, frequency_pct: 0 },
+      { x: 5, pdf: 0.12, frequency_pct: 15 },
+      { x: 10, pdf: 0.04, frequency_pct: 5 },
+    ],
+  });
 });
 
 test("requests wind rose analysis with the default dataset channels", async () => {
@@ -151,6 +164,15 @@ test("requests histogram analysis when the histogram tab is opened", async () =>
       column_id: "spd-1",
       num_bins: 24,
       exclude_flags: [],
+    });
+  });
+
+  await waitFor(() => {
+    expect(analysisMocks.getWeibullAnalysis).toHaveBeenCalledWith("dataset-1", {
+      column_id: "spd-1",
+      num_bins: 24,
+      exclude_flags: [],
+      method: "mle",
     });
   });
 });

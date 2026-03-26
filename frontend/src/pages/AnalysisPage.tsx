@@ -2,14 +2,14 @@ import { AlertTriangle, BarChart3, Compass, GaugeCircle, ShieldCheck, Wind } fro
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { getHistogramAnalysis, getWindRoseAnalysis } from "../api/analysis";
+import { getHistogramAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
 import { FrequencyHistogram } from "../components/analysis/FrequencyHistogram";
 import { getDataset, listProjectDatasets } from "../api/datasets";
 import { listFlags } from "../api/qc";
 import { WindRoseChart } from "../components/analysis/WindRoseChart";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { useProjectStore } from "../stores/projectStore";
-import type { HistogramResponse, WindRoseResponse } from "../types/analysis";
+import type { HistogramRequest, HistogramResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
 import type { DatasetColumn, DatasetDetail, DatasetSummary } from "../types/dataset";
 import type { Flag } from "../types/qc";
 
@@ -17,7 +17,7 @@ type AnalysisTab = "wind-rose" | "histogram" | "shear" | "turbulence" | "air-den
 
 const analysisTabs: Array<{ id: AnalysisTab; label: string; description: string }> = [
   { id: "wind-rose", label: "Wind Rose", description: "Directional frequency, mean speed, and energy." },
-  { id: "histogram", label: "Histogram", description: "Frequency distributions for any measured channel with configurable binning." },
+  { id: "histogram", label: "Histogram", description: "Frequency distributions for any measured channel, with Weibull overlays for wind speed." },
   { id: "shear", label: "Shear", description: "Vertical profile and extrapolation tooling remains staged." },
   { id: "turbulence", label: "Turbulence", description: "IEC TI analytics will follow in the next analysis tasks." },
   { id: "air-density", label: "Air Density", description: "Density and wind power density calculations will be added later." },
@@ -68,14 +68,19 @@ export function AnalysisPage() {
   const [histogramBinWidth, setHistogramBinWidth] = useState("");
   const [roseData, setRoseData] = useState<WindRoseResponse | null>(null);
   const [histogramData, setHistogramData] = useState<HistogramResponse | null>(null);
+  const [weibullData, setWeibullData] = useState<WeibullResponse | null>(null);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
   const [isLoadingDatasetDetail, setIsLoadingDatasetDetail] = useState(false);
   const [isLoadingFlags, setIsLoadingFlags] = useState(false);
   const [isLoadingWindRose, setIsLoadingWindRose] = useState(false);
   const [isLoadingHistogram, setIsLoadingHistogram] = useState(false);
+  const [isLoadingWeibull, setIsLoadingWeibull] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const [windRoseError, setWindRoseError] = useState<string | null>(null);
   const [histogramError, setHistogramError] = useState<string | null>(null);
+  const [weibullError, setWeibullError] = useState<string | null>(null);
+  const [showWeibullFit, setShowWeibullFit] = useState(true);
+  const [weibullMethod, setWeibullMethod] = useState<WeibullMethod>("mle");
   const { projects, fetchProjects } = useProjectStore();
 
   useEffect(() => {
@@ -131,6 +136,7 @@ export function AnalysisPage() {
       setSelectedHistogramColumnId("");
       setRoseData(null);
       setHistogramData(null);
+      setWeibullData(null);
       return;
     }
 
@@ -160,6 +166,40 @@ export function AnalysisPage() {
       cancelled = true;
     };
   }, [datasetId]);
+
+  const histogramColumns = datasetDetail?.columns ?? [];
+  const selectedHistogramColumn = useMemo(
+    () => histogramColumns.find((column) => column.id === selectedHistogramColumnId) ?? null,
+    [histogramColumns, selectedHistogramColumnId],
+  );
+  const histogramColumnLabel = selectedHistogramColumn?.name ?? "selected channel";
+  const isWeibullAvailable = selectedHistogramColumn?.measurement_type === "speed";
+  const histogramRequest = useMemo<HistogramRequest | null>(() => {
+    if (!selectedHistogramColumnId) {
+      return null;
+    }
+
+    const rawBinWidth = histogramBinWidth.trim();
+    const parsedBinWidth = rawBinWidth ? Number(rawBinWidth) : undefined;
+
+    return {
+      column_id: selectedHistogramColumnId,
+      num_bins: histogramBins,
+      exclude_flags: excludedFlagIds,
+      ...(parsedBinWidth !== undefined && Number.isFinite(parsedBinWidth) && parsedBinWidth > 0 ? { bin_width: parsedBinWidth } : {}),
+    };
+  }, [excludedFlagIds, histogramBinWidth, histogramBins, selectedHistogramColumnId]);
+
+  useEffect(() => {
+    if (isWeibullAvailable) {
+      setShowWeibullFit(true);
+      return;
+    }
+
+    setShowWeibullFit(false);
+    setWeibullData(null);
+    setWeibullError(null);
+  }, [isWeibullAvailable, datasetId, selectedHistogramColumnId]);
 
   useEffect(() => {
     if (!datasetId) {
@@ -229,7 +269,7 @@ export function AnalysisPage() {
   }, [activeTab, datasetId, excludedFlagIds, numSectors, selectedDirectionColumnId, selectedValueColumnId]);
 
   useEffect(() => {
-    if (activeTab !== "histogram" || !datasetId || !selectedHistogramColumnId) {
+    if (activeTab !== "histogram" || !datasetId || !histogramRequest) {
       setHistogramError(null);
       return;
     }
@@ -238,15 +278,7 @@ export function AnalysisPage() {
     setIsLoadingHistogram(true);
     setHistogramError(null);
 
-    const parsedBinWidth = histogramBinWidth.trim() ? Number(histogramBinWidth) : undefined;
-    const payload = {
-      column_id: selectedHistogramColumnId,
-      num_bins: histogramBins,
-      exclude_flags: excludedFlagIds,
-      ...(parsedBinWidth && parsedBinWidth > 0 ? { bin_width: parsedBinWidth } : {}),
-    };
-
-    void getHistogramAnalysis(datasetId, payload)
+    void getHistogramAnalysis(datasetId, histogramRequest)
       .then((response) => {
         if (!cancelled) {
           setHistogramData(response);
@@ -264,7 +296,44 @@ export function AnalysisPage() {
     return () => {
       cancelled = true;
     };
-  }, [activeTab, datasetId, excludedFlagIds, histogramBinWidth, histogramBins, selectedHistogramColumnId]);
+  }, [activeTab, datasetId, histogramRequest]);
+
+  useEffect(() => {
+    if (activeTab !== "histogram" || !datasetId || !histogramRequest || !isWeibullAvailable || !showWeibullFit) {
+      setIsLoadingWeibull(false);
+      setWeibullError(null);
+      if (!showWeibullFit || !isWeibullAvailable) {
+        setWeibullData(null);
+      }
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingWeibull(true);
+    setWeibullError(null);
+
+    void getWeibullAnalysis(datasetId, {
+      ...histogramRequest,
+      method: weibullMethod,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setWeibullData(response);
+          setIsLoadingWeibull(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setWeibullData(null);
+          setWeibullError(error instanceof Error ? error.message : "Unable to fit Weibull curve");
+          setIsLoadingWeibull(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetId, histogramRequest, isWeibullAvailable, showWeibullFit, weibullMethod]);
 
   const activeProject = projects.find((project) => project.id === projectId) ?? null;
   const directionColumns = useMemo(() => datasetDetail?.columns.filter((column) => column.measurement_type === "direction") ?? [], [datasetDetail]);
@@ -272,8 +341,6 @@ export function AnalysisPage() {
     () => datasetDetail?.columns.filter((column) => column.measurement_type !== "direction") ?? [],
     [datasetDetail],
   );
-  const histogramColumns = datasetDetail?.columns ?? [];
-  const histogramColumnLabel = histogramColumns.find((column) => column.id === selectedHistogramColumnId)?.name ?? "selected channel";
 
   function updateSearch(next: { projectId?: string; datasetId?: string }) {
     const nextParams = new URLSearchParams(searchParams);
@@ -306,9 +373,9 @@ export function AnalysisPage() {
       <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.95fr)] xl:items-end">
           <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Tasks 14-15</span>
+            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Tasks 14-16</span>
             <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Explore directional behaviour and live distributions inside a QC-aware analysis workspace.
+              Explore directional behaviour, live distributions, and Weibull fits inside a QC-aware analysis workspace.
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
               Choose a dataset, then move between wind roses and histograms without leaving the same cleaned-data context or reselecting your QC filters.
@@ -557,7 +624,20 @@ export function AnalysisPage() {
                 {!selectedHistogramColumnId ? (
                   <section className="panel-surface p-8 text-sm text-ink-600">Select a data column to build the histogram.</section>
                 ) : (
-                  <FrequencyHistogram data={histogramData} isLoading={isLoadingHistogram} error={histogramError} columnLabel={histogramColumnLabel} />
+                  <FrequencyHistogram
+                    data={histogramData}
+                    isLoading={isLoadingHistogram}
+                    error={histogramError}
+                    columnLabel={histogramColumnLabel}
+                    isWeibullAvailable={isWeibullAvailable}
+                    showWeibullFit={showWeibullFit}
+                    onToggleWeibullFit={setShowWeibullFit}
+                    weibullMethod={weibullMethod}
+                    onChangeWeibullMethod={setWeibullMethod}
+                    weibullData={weibullData}
+                    isLoadingWeibull={isLoadingWeibull}
+                    weibullError={weibullError}
+                  />
                 )}
               </div>
             </section>

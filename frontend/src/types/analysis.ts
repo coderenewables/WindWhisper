@@ -69,3 +69,35 @@ export interface HistogramRequest {
   max_val?: number;
   exclude_flags?: string[];
 }
+
+export type WeibullMethod = "mle" | "moments";
+
+export interface WeibullFit {
+  method: WeibullMethod;
+  k: number;
+  A: number;
+  mean_speed: number;
+  mean_power_density: number;
+  r_squared: number;
+  rmse: number;
+  ks_stat: number;
+}
+
+export interface WeibullCurvePoint {
+  x: number;
+  pdf: number;
+  frequency_pct: number;
+}
+
+export interface WeibullResponse {
+  dataset_id: string;
+  column_id: string;
+  excluded_flag_ids: string[];
+  fit: WeibullFit;
+  curve_points: WeibullCurvePoint[];
+}
+
+export interface WeibullRequest extends HistogramRequest {
+  method?: WeibullMethod;
+  curve_points?: number;
+}

@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 DEFAULT_SPEED_BIN_EDGES = [0.0, 3.0, 6.0, 9.0, 12.0, 15.0]
 DEFAULT_HISTOGRAM_BIN_COUNT = 30
+DEFAULT_WEIBULL_CURVE_POINTS = 160
+WeibullMethod = Literal["mle", "moments"]
 
 
 class WindRoseRequest(BaseModel):
@@ -80,3 +82,39 @@ class HistogramResponse(BaseModel):
     excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
     bins: list[HistogramBinResponse] = Field(default_factory=list)
     stats: HistogramStatsResponse
+
+
+class WeibullRequest(BaseModel):
+    column_id: uuid.UUID
+    num_bins: Annotated[int, Field(default=DEFAULT_HISTOGRAM_BIN_COUNT, ge=1, le=200)] = DEFAULT_HISTOGRAM_BIN_COUNT
+    bin_width: float | None = Field(default=None, gt=0)
+    min_val: float | None = None
+    max_val: float | None = None
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    method: WeibullMethod = "mle"
+    curve_points: Annotated[int, Field(default=DEFAULT_WEIBULL_CURVE_POINTS, ge=24, le=600)] = DEFAULT_WEIBULL_CURVE_POINTS
+
+
+class WeibullFitResponse(BaseModel):
+    method: WeibullMethod
+    k: float
+    A: float
+    mean_speed: float
+    mean_power_density: float
+    r_squared: float
+    rmse: float
+    ks_stat: float
+
+
+class WeibullCurvePointResponse(BaseModel):
+    x: float
+    pdf: float
+    frequency_pct: float
+
+
+class WeibullResponse(BaseModel):
+    dataset_id: uuid.UUID
+    column_id: uuid.UUID
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    fit: WeibullFitResponse
+    curve_points: list[WeibullCurvePointResponse] = Field(default_factory=list)

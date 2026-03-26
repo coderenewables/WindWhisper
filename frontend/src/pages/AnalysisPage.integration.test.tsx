@@ -168,6 +168,45 @@ function buildHistogramResponse(payload: Record<string, unknown>) {
   };
 }
 
+function buildWeibullResponse(payload: Record<string, unknown>) {
+  const visibleRows = getVisibleRows(Array.isArray(payload.exclude_flags) ? (payload.exclude_flags as string[]) : []);
+  const values = visibleRows.map((row) => row.speed);
+  const method = payload.method === "moments" ? "moments" : "mle";
+  const A = method === "moments" ? 7.52 : 7.24;
+  const k = method === "moments" ? 2.11 : 1.98;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const numBins = Number(payload.num_bins ?? 24);
+  const binWidth = ((max - min) || 1) / numBins;
+  const points = Array.from({ length: 120 }, (_, index) => {
+    const x = min + ((max - min) * index) / 119;
+    const scaled = x / A;
+    const pdf = x <= 0 ? 0 : (k / A) * scaled ** (k - 1) * Math.exp(-(scaled ** k));
+    return {
+      x,
+      pdf,
+      frequency_pct: pdf * binWidth * 100,
+    };
+  });
+
+  return {
+    dataset_id: seededDatasetSummary.id,
+    column_id: String(payload.column_id),
+    excluded_flag_ids: Array.isArray(payload.exclude_flags) ? payload.exclude_flags : [],
+    fit: {
+      method,
+      k,
+      A,
+      mean_speed: method === "moments" ? 6.82 : 6.61,
+      mean_power_density: method === "moments" ? 249.4 : 236.2,
+      r_squared: method === "moments" ? 0.966 : 0.978,
+      rmse: method === "moments" ? 0.031 : 0.024,
+      ks_stat: method === "moments" ? 0.084 : 0.061,
+    },
+    curve_points: points,
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={[`/analysis?projectId=${seededProject.id}&datasetId=${seededDatasetSummary.id}`]}>
@@ -212,6 +251,9 @@ beforeEach(() => {
     if (url === `/analysis/histogram/${seededDatasetSummary.id}`) {
       return makeResponse(buildHistogramResponse(payload as Record<string, unknown>));
     }
+    if (url === `/analysis/weibull/${seededDatasetSummary.id}`) {
+      return makeResponse(buildWeibullResponse(payload as Record<string, unknown>));
+    }
     throw new Error(`Unhandled POST ${String(url)}`);
   });
 });
@@ -230,6 +272,8 @@ test("switches the live analysis page from wind rose to histogram using seeded b
 
   await screen.findByText(/distribution of speed 80m/i);
   await screen.findByText("100.0%");
+  await screen.findByText(/k parameter/i);
+  expect(screen.getByText(/maximum likelihood/i)).toBeInTheDocument();
 
   await user.click(screen.getByLabelText(/exclude south/i));
 
@@ -242,10 +286,23 @@ test("switches the live analysis page from wind rose to histogram using seeded b
   await user.keyboard("{Control>}a{/Control}4");
 
   await waitFor(() => {
-    expect(apiClient.post).toHaveBeenLastCalledWith(`/analysis/histogram/${seededDatasetSummary.id}`, {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/histogram/${seededDatasetSummary.id}`, {
       column_id: "spd-80m",
       num_bins: 4,
       exclude_flags: [seededFlags[0].id],
     });
   });
+
+  await user.click(screen.getByLabelText(/moments/i));
+
+  await waitFor(() => {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/weibull/${seededDatasetSummary.id}`, {
+      column_id: "spd-80m",
+      num_bins: 4,
+      exclude_flags: [seededFlags[0].id],
+      method: "moments",
+    });
+  });
+
+  await screen.findByText(/wasp moments/i);
 });
