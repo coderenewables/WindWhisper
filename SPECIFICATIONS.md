@@ -346,7 +346,7 @@ CREATE TABLE analysis_results (
 | ML | scikit-learn 1.4+ | KNN data reconstruction |
 | File parsing | openpyxl, python-pptx | Excel import |
 | Report gen | python-docx, WeasyPrint | Word / PDF report generation |
-| Reanalysis data | cdsapi (ERA5), xarray, netCDF4 | Download ERA5/MERRA-2 reference data |
+| Reanalysis data | EarthDataHub ERA5 API, NASA POWER Hourly API, pandas/json parsing | Download ERA5 and MERRA-2-backed reference data |
 | Task queue | Celery + Redis (or background tasks) | Long-running computations |
 | Testing | pytest, httpx | Unit + integration tests |
 
@@ -1594,37 +1594,44 @@ Undo system, workflows, testing, deployment, documentation.
 
 **Implementation Details**:
 1. Create `services/reanalysis_download.py`:
-   - **ERA5** via CDS API (`cdsapi` library):
-     - `download_era5(lat, lon, start_year, end_year, variables=['100m_u/v_component_of_wind', '10m_u/v_component_of_wind', '2m_temperature', 'surface_pressure']) -> pd.DataFrame`
-     - Convert u/v components to speed and direction
-     - Resample to hourly or monthly as needed
-     - Return DataFrame with standard columns
-   - **MERRA-2** via NASA GES DISC (OPeNDAP or direct download):
-     - `download_merra2(lat, lon, start_year, end_year) -> pd.DataFrame`
-     - Use xarray to handle NetCDF data
-     - Extract wind speed at 50m, temperature, pressure at nearest grid point
+    - **ERA5** via the DestinE EarthDataHub ERA5 single-levels dataset:
+       - Source dataset: `https://earthdatahub.destine.eu/collections/era5/datasets/reanalysis-era5-single-levels`
+       - `download_era5(lat, lon, start_year, end_year, api_key, variables=['100m_u_component_of_wind', '100m_v_component_of_wind', '10m_u_component_of_wind', '10m_v_component_of_wind', '2m_temperature', 'surface_pressure']) -> pd.DataFrame`
+       - The user must provide their own EarthDataHub / DestinE API key through the application UI; the repository must not ship with a shared key or assume a server-side project key
+       - Use the user-supplied API key only for the active request flow and do not hardcode it in source control
+       - Convert u/v components to speed and direction
+       - Resample to hourly or monthly as needed
+       - Return DataFrame with standard columns
+    - **MERRA-2** via the NASA POWER Hourly API:
+       - Source API docs: `https://power.larc.nasa.gov/api/pages/?urls.primaryName=Hourly`
+       - `download_merra2(lat, lon, start_year, end_year) -> pd.DataFrame`
+       - Use the NASA POWER hourly endpoint to retrieve MERRA-2-backed reanalysis parameters for the nearest grid point
+       - Parse JSON or CSV responses into the standard reference-data DataFrame format
+       - Extract wind speed at 50m, temperature, pressure at the selected coordinates
    - Both functions:
      - Cache downloaded data locally (avoid redundant downloads)
      - Provide download progress callback for WebSocket updates
-     - Handle API key configuration (CDS API key for ERA5, EarthData for MERRA-2)
+          - Handle credentials explicitly in the workflow (user-entered EarthDataHub API key for ERA5; NASA POWER Hourly access for MERRA-2 does not require a separate user credential under the current API)
 2. **Backend endpoints**:
-   - `POST /api/mcp/download-reference` — initiate download with params (source, lat, lon, years)
+    - `POST /api/mcp/download-reference` — initiate download with params (source, lat, lon, years, api_key?)
    - `GET /api/mcp/download-status/{task_id}` — check download progress
    - Downloads run as background tasks (FastAPI BackgroundTasks or Celery)
 3. **Frontend**: Add "Download Reference Data" section in ReferenceDataSelector:
    - Source selector: ERA5, MERRA-2
    - Auto-fill lat/lon from project
    - Year range selector (default: 20 years back to present)
+    - API key input for ERA5 downloads so users can paste their own EarthDataHub / DestinE key into the application at runtime
    - Download button with progress indicator
    - On complete: new reference dataset appears in the project
 
 **Acceptance Criteria**:
-- [ ] ERA5 download works for a given lat/lon and date range
-- [ ] MERRA-2 download works for a given lat/lon and date range
+- [ ] ERA5 download works for a given lat/lon and date range using the DestinE EarthDataHub ERA5 dataset
+- [ ] The application prompts for a user-supplied ERA5 API key instead of relying on a bundled or shared project key
+- [ ] MERRA-2 download works for a given lat/lon and date range using the NASA POWER Hourly API
 - [ ] Wind speed + direction computed from u/v components
 - [ ] Downloaded data auto-imported as a reference dataset in the project
 - [ ] Progress indication works during download
-- [ ] API key configuration is documented
+- [ ] User credential entry requirements are documented in the UI and developer documentation
 
 **Stopping Point**: Can download ERA5/MERRA-2 data from the UI, auto-imported as reference datasets for MCP.
 

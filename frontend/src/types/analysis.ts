@@ -339,6 +339,7 @@ export interface ExtremeWindSummary {
 }
 
 export type MCPMethod = "linear" | "variance_ratio" | "matrix";
+export type MCPReferenceDataSource = "era5" | "merra2";
 
 export interface MCPCorrelationPoint {
   timestamp: string;
@@ -494,6 +495,39 @@ export interface MCPComparisonResponse {
   ref_excluded_flag_ids: string[];
   recommended_method: MCPMethod;
   results: MCPComparisonRow[];
+}
+
+export interface MCPReferenceDownloadRequest {
+  project_id: string;
+  source: MCPReferenceDataSource;
+  latitude: number;
+  longitude: number;
+  start_year: number;
+  end_year: number;
+  dataset_name?: string | null;
+  api_key?: string | null;
+}
+
+export interface MCPReferenceDownloadResponse {
+  task_id: string;
+  status: "queued" | "running" | "completed" | "failed";
+  message: string;
+}
+
+export interface MCPReferenceDownloadStatusResponse {
+  task_id: string;
+  project_id: string;
+  source: MCPReferenceDataSource;
+  status: "queued" | "running" | "completed" | "failed";
+  message: string;
+  progress: number;
+  dataset_id: string | null;
+  dataset_name: string | null;
+  row_count: number;
+  column_count: number;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
 }
 
 export interface ExtremeWindResponse {

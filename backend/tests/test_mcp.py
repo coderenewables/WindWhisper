@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
+import pandas as pd
 from httpx import AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import DataColumn, Dataset, Project, TimeseriesData
@@ -309,3 +312,107 @@ async def test_mcp_compare_uses_cross_validation_and_recommends_matrix_when_pred
     assert matrix_row["uncertainty"] < variance_row["uncertainty"]
     assert linear_row["cross_validation"]["fold_count"] >= 3
     assert variance_row["cross_validation"]["fold_count"] >= 3
+
+
+async def _seed_reference_project(db_session: AsyncSession) -> Project:
+    project = Project(name="Reference Download Project", latitude=12.5, longitude=77.6)
+    db_session.add(project)
+    await db_session.commit()
+    return project
+
+
+async def test_reference_download_requires_era5_api_key(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = await _seed_reference_project(db_session)
+
+    response = await client.post(
+        "/api/mcp/download-reference",
+        json={
+            "project_id": str(project.id),
+            "source": "era5",
+            "latitude": 12.5,
+            "longitude": 77.6,
+            "start_year": 2010,
+            "end_year": 2011,
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "ERA5 downloads require an EarthDataHub API key"
+
+
+async def test_merra2_reference_download_task_imports_dataset(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    project = await _seed_reference_project(db_session)
+
+    async def fake_download_merra2(
+        lat: float,
+        lon: float,
+        start_year: int,
+        end_year: int,
+        progress_callback=None,
+    ) -> pd.DataFrame:
+        assert lat == 12.5
+        assert lon == 77.6
+        assert start_year == 2005
+        assert end_year == 2006
+        if progress_callback is not None:
+            await progress_callback(40, "Fetched fake POWER response")
+        index = pd.date_range("2005-01-01T00:00:00Z", periods=4, freq="h")
+        return pd.DataFrame(
+            {
+                "Speed_50m": [6.0, 6.5, 7.0, 7.5],
+                "Dir_50m": [180.0, 182.0, 184.0, 186.0],
+                "Temp_2m": [20.0, 21.0, 22.0, 23.0],
+                "Pressure_hPa": [1012.0, 1011.0, 1010.0, 1009.0],
+            },
+            index=index,
+        )
+
+    monkeypatch.setattr("app.services.reanalysis_download.CACHE_DIR", tmp_path)
+    monkeypatch.setattr("app.services.reanalysis_download.download_merra2", fake_download_merra2)
+
+    start_response = await client.post(
+        "/api/mcp/download-reference",
+        json={
+            "project_id": str(project.id),
+            "source": "merra2",
+            "latitude": 12.5,
+            "longitude": 77.6,
+            "start_year": 2005,
+            "end_year": 2006,
+            "dataset_name": "POWER Reference",
+        },
+    )
+
+    assert start_response.status_code == 202
+    task_id = start_response.json()["task_id"]
+
+    status_payload = None
+    for _ in range(60):
+        status_response = await client.get(f"/api/mcp/download-status/{task_id}")
+        assert status_response.status_code == 200
+        status_payload = status_response.json()
+        if status_payload["status"] == "completed":
+            break
+        await asyncio.sleep(0.05)
+
+    assert status_payload is not None
+    assert status_payload["status"] == "completed"
+    assert status_payload["dataset_name"] == "POWER Reference"
+    assert status_payload["row_count"] == 4
+    assert status_payload["column_count"] == 4
+
+    dataset = (await db_session.execute(select(Dataset).where(Dataset.id == status_payload["dataset_id"]))).scalar_one()
+    assert dataset.project_id == project.id
+    assert dataset.source_type == "reanalysis"
+    assert dataset.metadata_json["provider"] == "nasa_power"
+
+    columns = (await db_session.execute(select(DataColumn).where(DataColumn.dataset_id == dataset.id))).scalars().all()
+    assert {column.name for column in columns} == {"Speed_50m", "Dir_50m", "Temp_2m", "Pressure_hPa"}
+
+    rows = (await db_session.execute(select(TimeseriesData).where(TimeseriesData.dataset_id == dataset.id))).scalars().all()
+    assert len(rows) == 4

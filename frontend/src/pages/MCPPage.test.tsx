@@ -11,6 +11,8 @@ const mcpMocks = vi.hoisted(() => ({
   getMcpCorrelation: vi.fn(),
   getMcpComparison: vi.fn(),
   getMcpPrediction: vi.fn(),
+  downloadMcpReferenceData: vi.fn(),
+  getMcpDownloadStatus: vi.fn(),
 }));
 
 vi.mock("../api/datasets", () => ({
@@ -22,6 +24,8 @@ vi.mock("../api/analysis", () => ({
   getMcpCorrelation: mcpMocks.getMcpCorrelation,
   getMcpComparison: mcpMocks.getMcpComparison,
   getMcpPrediction: mcpMocks.getMcpPrediction,
+  downloadMcpReferenceData: mcpMocks.downloadMcpReferenceData,
+  getMcpDownloadStatus: mcpMocks.getMcpDownloadStatus,
 }));
 
 vi.mock("../stores/projectStore", () => ({
@@ -232,6 +236,26 @@ beforeEach(() => {
       },
     ],
   });
+  mcpMocks.downloadMcpReferenceData.mockResolvedValue({
+    task_id: "task-1",
+    status: "queued",
+    message: "Reference download queued",
+  });
+  mcpMocks.getMcpDownloadStatus.mockResolvedValue({
+    task_id: "task-1",
+    project_id: "project-1",
+    source: "merra2",
+    status: "completed",
+    message: "Reference dataset imported",
+    progress: 100,
+    dataset_id: "dataset-ref-new",
+    dataset_name: "MERRA-2 POWER 2005-2025",
+    row_count: 100,
+    column_count: 4,
+    error: null,
+    started_at: "2025-01-01T00:00:00Z",
+    completed_at: "2025-01-01T00:10:00Z",
+  });
 });
 
 test("runs the matrix MCP workflow with additional site and reference channels", async () => {
@@ -289,4 +313,59 @@ test("runs the matrix MCP workflow with additional site and reference channels",
   });
 
   expect((await screen.findAllByText(/matrix output/i)).length).toBeGreaterThan(1);
+});
+
+test("downloads a new MERRA-2 reference dataset from the MCP workspace", async () => {
+  const user = userEvent.setup();
+  mcpMocks.listProjectDatasets
+    .mockResolvedValueOnce({ datasets, total: 2 })
+    .mockResolvedValueOnce({
+      datasets: [
+        ...datasets,
+        {
+          id: "dataset-ref-new",
+          project_id: "project-1",
+          name: "MERRA-2 POWER 2005-2025",
+          source_type: "reanalysis",
+          file_name: null,
+          time_step_seconds: 3600,
+          start_time: "2005-01-01T00:00:00Z",
+          end_time: "2025-12-31T23:00:00Z",
+          created_at: "2026-03-27T00:00:00Z",
+          row_count: 100,
+          column_count: 4,
+        },
+      ],
+      total: 3,
+    });
+
+  renderPage();
+
+  await screen.findByRole("heading", { name: /correlate short-term site measurements/i });
+
+  await user.selectOptions(screen.getByLabelText(/source/i), "merra2");
+  await user.clear(screen.getByLabelText(/start year/i));
+  await user.type(screen.getByLabelText(/start year/i), "2005");
+  await user.clear(screen.getByLabelText(/end year/i));
+  await user.type(screen.getByLabelText(/end year/i), "2025");
+  await user.click(screen.getByRole("button", { name: /download reference data/i }));
+
+  await waitFor(() => {
+    expect(mcpMocks.downloadMcpReferenceData).toHaveBeenCalledWith({
+      project_id: "project-1",
+      source: "merra2",
+      latitude: 12,
+      longitude: 15,
+      start_year: 2005,
+      end_year: 2025,
+      dataset_name: undefined,
+      api_key: undefined,
+    });
+  });
+
+  await waitFor(() => {
+    expect(mcpMocks.getMcpDownloadStatus).toHaveBeenCalledWith("task-1");
+  });
+
+  expect(await screen.findByText(/imported merra-2 power 2005-2025/i)).toBeInTheDocument();
 });

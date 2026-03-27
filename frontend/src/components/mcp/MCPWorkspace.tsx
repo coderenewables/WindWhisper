@@ -4,7 +4,14 @@ import { CorrelationChart } from "./CorrelationChart";
 import { LTAResultsTable } from "./LTAResultsTable";
 import { ReferenceDataSelector } from "./ReferenceDataSelector";
 import { LoadingSpinner } from "../common/LoadingSpinner";
-import type { MCPComparisonResponse, MCPCorrelationResponse, MCPMethod, MCPPredictionResponse } from "../../types/analysis";
+import type {
+  MCPComparisonResponse,
+  MCPCorrelationResponse,
+  MCPMethod,
+  MCPPredictionResponse,
+  MCPReferenceDataSource,
+  MCPReferenceDownloadStatusResponse,
+} from "../../types/analysis";
 import type { DatasetDetail, DatasetSummary } from "../../types/dataset";
 
 interface MCPWorkspaceProps {
@@ -21,6 +28,16 @@ interface MCPWorkspaceProps {
   correlationData: MCPCorrelationResponse | null;
   comparisonData: MCPComparisonResponse | null;
   predictionData: MCPPredictionResponse | null;
+  downloadSource: MCPReferenceDataSource;
+  downloadLatitude: string;
+  downloadLongitude: string;
+  downloadStartYear: string;
+  downloadEndYear: string;
+  downloadDatasetName: string;
+  downloadApiKey: string;
+  downloadStatus: MCPReferenceDownloadStatusResponse | null;
+  downloadError: string | null;
+  isDownloading: boolean;
   pageError: string | null;
   correlationError: string | null;
   predictionError: string | null;
@@ -36,6 +53,14 @@ interface MCPWorkspaceProps {
   onExtraSiteColumnsChange: (columnIds: string[]) => void;
   onExtraRefColumnsChange: (columnIds: string[]) => void;
   onMethodChange: (method: MCPMethod) => void;
+  onDownloadSourceChange: (source: MCPReferenceDataSource) => void;
+  onDownloadLatitudeChange: (value: string) => void;
+  onDownloadLongitudeChange: (value: string) => void;
+  onDownloadStartYearChange: (value: string) => void;
+  onDownloadEndYearChange: (value: string) => void;
+  onDownloadDatasetNameChange: (value: string) => void;
+  onDownloadApiKeyChange: (value: string) => void;
+  onStartDownload: () => void;
   onRunCorrelation: () => void;
   onRunCompare: () => void;
   onRunPrediction: () => void;
@@ -55,6 +80,16 @@ export function MCPWorkspace({
   correlationData,
   comparisonData,
   predictionData,
+  downloadSource,
+  downloadLatitude,
+  downloadLongitude,
+  downloadStartYear,
+  downloadEndYear,
+  downloadDatasetName,
+  downloadApiKey,
+  downloadStatus,
+  downloadError,
+  isDownloading,
   pageError,
   correlationError,
   predictionError,
@@ -70,11 +105,19 @@ export function MCPWorkspace({
   onExtraSiteColumnsChange,
   onExtraRefColumnsChange,
   onMethodChange,
+  onDownloadSourceChange,
+  onDownloadLatitudeChange,
+  onDownloadLongitudeChange,
+  onDownloadStartYearChange,
+  onDownloadEndYearChange,
+  onDownloadDatasetNameChange,
+  onDownloadApiKeyChange,
+  onStartDownload,
   onRunCorrelation,
   onRunCompare,
   onRunPrediction,
 }: MCPWorkspaceProps) {
-  const isReady = Boolean(siteDatasetId && refDatasetId && siteColumnId && refColumnId);
+  const isReady = Boolean(siteDatasetId && refDatasetId && siteDatasetId !== refDatasetId && siteColumnId && refColumnId);
 
   return (
     <div className="space-y-6">
@@ -134,6 +177,16 @@ export function MCPWorkspace({
           extraRefColumnIds={extraRefColumnIds}
           method={method}
           correlationData={correlationData}
+          downloadSource={downloadSource}
+          downloadLatitude={downloadLatitude}
+          downloadLongitude={downloadLongitude}
+          downloadStartYear={downloadStartYear}
+          downloadEndYear={downloadEndYear}
+          downloadDatasetName={downloadDatasetName}
+          downloadApiKey={downloadApiKey}
+          downloadStatus={downloadStatus}
+          downloadError={downloadError}
+          isDownloading={isDownloading}
           onSiteDatasetChange={onSiteDatasetChange}
           onRefDatasetChange={onRefDatasetChange}
           onSiteColumnChange={onSiteColumnChange}
@@ -141,6 +194,14 @@ export function MCPWorkspace({
           onExtraSiteColumnsChange={onExtraSiteColumnsChange}
           onExtraRefColumnsChange={onExtraRefColumnsChange}
           onMethodChange={onMethodChange}
+          onDownloadSourceChange={onDownloadSourceChange}
+          onDownloadLatitudeChange={onDownloadLatitudeChange}
+          onDownloadLongitudeChange={onDownloadLongitudeChange}
+          onDownloadStartYearChange={onDownloadStartYearChange}
+          onDownloadEndYearChange={onDownloadEndYearChange}
+          onDownloadDatasetNameChange={onDownloadDatasetNameChange}
+          onDownloadApiKeyChange={onDownloadApiKeyChange}
+          onStartDownload={onStartDownload}
         />
 
         <section className="panel-surface p-6">

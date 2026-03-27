@@ -12,6 +12,9 @@ import type {
   MCPComparisonResponse,
   MCPCorrelationRequest,
   MCPCorrelationResponse,
+  MCPReferenceDownloadRequest,
+  MCPReferenceDownloadResponse,
+  MCPReferenceDownloadStatusResponse,
   MCPPredictionRequest,
   MCPPredictionResponse,
   ShearRequest,
@@ -76,5 +79,15 @@ export async function getMcpPrediction(payload: MCPPredictionRequest): Promise<M
 
 export async function getMcpComparison(payload: MCPComparisonRequest): Promise<MCPComparisonResponse> {
   const response = await apiClient.post<MCPComparisonResponse>("/mcp/compare", payload);
+  return response.data;
+}
+
+export async function downloadMcpReferenceData(payload: MCPReferenceDownloadRequest): Promise<MCPReferenceDownloadResponse> {
+  const response = await apiClient.post<MCPReferenceDownloadResponse>("/mcp/download-reference", payload);
+  return response.data;
+}
+
+export async function getMcpDownloadStatus(taskId: string): Promise<MCPReferenceDownloadStatusResponse> {
+  const response = await apiClient.get<MCPReferenceDownloadStatusResponse>(`/mcp/download-status/${taskId}`);
   return response.data;
 }

@@ -1,7 +1,7 @@
-import { CalendarRange, Database, Layers3, Radar, Wind } from "lucide-react";
+import { CalendarRange, Database, Download, KeyRound, Layers3, Radar, Wind } from "lucide-react";
 
 import type { DatasetColumn, DatasetDetail, DatasetSummary } from "../../types/dataset";
-import type { MCPCorrelationResponse, MCPMethod } from "../../types/analysis";
+import type { MCPCorrelationResponse, MCPMethod, MCPReferenceDataSource, MCPReferenceDownloadStatusResponse } from "../../types/analysis";
 
 interface ReferenceDataSelectorProps {
   datasets: DatasetSummary[];
@@ -15,6 +15,16 @@ interface ReferenceDataSelectorProps {
   extraRefColumnIds: string[];
   method: MCPMethod;
   correlationData: MCPCorrelationResponse | null;
+  downloadSource: MCPReferenceDataSource;
+  downloadLatitude: string;
+  downloadLongitude: string;
+  downloadStartYear: string;
+  downloadEndYear: string;
+  downloadDatasetName: string;
+  downloadApiKey: string;
+  downloadStatus: MCPReferenceDownloadStatusResponse | null;
+  downloadError: string | null;
+  isDownloading: boolean;
   onSiteDatasetChange: (datasetId: string) => void;
   onRefDatasetChange: (datasetId: string) => void;
   onSiteColumnChange: (columnId: string) => void;
@@ -22,6 +32,14 @@ interface ReferenceDataSelectorProps {
   onExtraSiteColumnsChange: (columnIds: string[]) => void;
   onExtraRefColumnsChange: (columnIds: string[]) => void;
   onMethodChange: (method: MCPMethod) => void;
+  onDownloadSourceChange: (source: MCPReferenceDataSource) => void;
+  onDownloadLatitudeChange: (value: string) => void;
+  onDownloadLongitudeChange: (value: string) => void;
+  onDownloadStartYearChange: (value: string) => void;
+  onDownloadEndYearChange: (value: string) => void;
+  onDownloadDatasetNameChange: (value: string) => void;
+  onDownloadApiKeyChange: (value: string) => void;
+  onStartDownload: () => void;
 }
 
 function formatDateRange(startTime: string | null, endTime: string | null) {
@@ -76,14 +94,18 @@ function DatasetColumnSelect({
   value: string;
   onChange: (nextValue: string) => void;
 }) {
+  const hasColumns = columns.length > 0;
+
   return (
     <label className="space-y-2 text-sm text-ink-700">
       <span className="font-medium text-ink-800">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        disabled={!hasColumns}
         className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
       >
+        {!hasColumns ? <option value="">No speed columns available</option> : null}
         {columns.map((column) => (
           <option key={column.id} value={column.id}>
             {column.name}
@@ -162,6 +184,16 @@ export function ReferenceDataSelector({
   extraRefColumnIds,
   method,
   correlationData,
+  downloadSource,
+  downloadLatitude,
+  downloadLongitude,
+  downloadStartYear,
+  downloadEndYear,
+  downloadDatasetName,
+  downloadApiKey,
+  downloadStatus,
+  downloadError,
+  isDownloading,
   onSiteDatasetChange,
   onRefDatasetChange,
   onSiteColumnChange,
@@ -169,6 +201,14 @@ export function ReferenceDataSelector({
   onExtraSiteColumnsChange,
   onExtraRefColumnsChange,
   onMethodChange,
+  onDownloadSourceChange,
+  onDownloadLatitudeChange,
+  onDownloadLongitudeChange,
+  onDownloadStartYearChange,
+  onDownloadEndYearChange,
+  onDownloadDatasetNameChange,
+  onDownloadApiKeyChange,
+  onStartDownload,
 }: ReferenceDataSelectorProps) {
   const siteDataset = datasets.find((dataset) => dataset.id === siteDatasetId);
   const referenceDataset = datasets.find((dataset) => dataset.id === refDatasetId);
@@ -198,6 +238,7 @@ export function ReferenceDataSelector({
             onChange={(event) => onSiteDatasetChange(event.target.value)}
             className="mt-4 w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
           >
+            {datasets.length === 0 ? <option value="">No datasets available</option> : null}
             {datasets.map((dataset) => (
               <option key={dataset.id} value={dataset.id}>
                 {dataset.name}
@@ -229,6 +270,7 @@ export function ReferenceDataSelector({
             onChange={(event) => onRefDatasetChange(event.target.value)}
             className="mt-4 w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-ember-300 focus:ring-2 focus:ring-ember-100"
           >
+            <option value="">Select a reference dataset</option>
             {datasets.map((dataset) => (
               <option key={dataset.id} value={dataset.id}>
                 {dataset.name}
@@ -250,6 +292,119 @@ export function ReferenceDataSelector({
             </div>
           ) : null}
         </div>
+      </div>
+
+      <div className="mt-6 panel-muted p-5">
+        <div className="flex items-center gap-2 text-sm font-medium text-ink-800">
+          <Download className="h-4 w-4 text-ember-500" />
+          Download reference data
+        </div>
+        <p className="mt-3 text-sm leading-7 text-ink-600">Fetch a new reanalysis dataset into this project without leaving the MCP workspace. ERA5 requires a user-provided EarthDataHub key. MERRA-2 uses NASA POWER Hourly.</p>
+
+        <div className="mt-5 grid gap-4 xl:grid-cols-[minmax(0,220px)_repeat(2,minmax(0,1fr))]">
+          <label className="space-y-2 text-sm text-ink-700">
+            <span className="font-medium text-ink-800">Source</span>
+            <select
+              value={downloadSource}
+              onChange={(event) => onDownloadSourceChange(event.target.value as MCPReferenceDataSource)}
+              className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-ember-300 focus:ring-2 focus:ring-ember-100"
+            >
+              <option value="era5">ERA5 EarthDataHub</option>
+              <option value="merra2">MERRA-2 POWER Hourly</option>
+            </select>
+          </label>
+
+          <label className="space-y-2 text-sm text-ink-700">
+            <span className="font-medium text-ink-800">Latitude</span>
+            <input
+              value={downloadLatitude}
+              onChange={(event) => onDownloadLatitudeChange(event.target.value)}
+              inputMode="decimal"
+              className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
+            />
+          </label>
+
+          <label className="space-y-2 text-sm text-ink-700">
+            <span className="font-medium text-ink-800">Longitude</span>
+            <input
+              value={downloadLongitude}
+              onChange={(event) => onDownloadLongitudeChange(event.target.value)}
+              inputMode="decimal"
+              className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
+            />
+          </label>
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[repeat(2,minmax(0,160px))_minmax(0,1fr)]">
+          <label className="space-y-2 text-sm text-ink-700">
+            <span className="font-medium text-ink-800">Start year</span>
+            <input
+              value={downloadStartYear}
+              onChange={(event) => onDownloadStartYearChange(event.target.value)}
+              inputMode="numeric"
+              className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
+            />
+          </label>
+
+          <label className="space-y-2 text-sm text-ink-700">
+            <span className="font-medium text-ink-800">End year</span>
+            <input
+              value={downloadEndYear}
+              onChange={(event) => onDownloadEndYearChange(event.target.value)}
+              inputMode="numeric"
+              className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
+            />
+          </label>
+
+          <label className="space-y-2 text-sm text-ink-700">
+            <span className="font-medium text-ink-800">Dataset name</span>
+            <input
+              value={downloadDatasetName}
+              onChange={(event) => onDownloadDatasetNameChange(event.target.value)}
+              placeholder="Optional custom dataset name"
+              className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-200"
+            />
+          </label>
+        </div>
+
+        {downloadSource === "era5" ? (
+          <label className="mt-4 block space-y-2 text-sm text-ink-700">
+            <span className="flex items-center gap-2 font-medium text-ink-800">
+              <KeyRound className="h-4 w-4 text-ember-500" />
+              EarthDataHub API key
+            </span>
+            <input
+              type="password"
+              value={downloadApiKey}
+              onChange={(event) => onDownloadApiKeyChange(event.target.value)}
+              placeholder="Paste your EarthDataHub / DestinE key"
+              className="w-full rounded-2xl border border-ink-200 bg-white px-4 py-3 text-sm text-ink-900 shadow-sm outline-none transition focus:border-ember-300 focus:ring-2 focus:ring-ember-100"
+            />
+            <p className="text-xs leading-6 text-ink-600">The key is used only for this request flow and is not stored in the project metadata returned to the UI.</p>
+          </label>
+        ) : (
+          <div className="mt-4 rounded-2xl border border-dashed border-ink-200 bg-white/70 px-4 py-3 text-sm text-ink-600">NASA POWER Hourly access does not require a separate user credential for this flow.</div>
+        )}
+
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={onStartDownload}
+            disabled={isDownloading}
+            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-ember-500 px-5 py-3 text-sm font-medium text-white transition hover:bg-ember-400 disabled:cursor-not-allowed disabled:bg-ember-200"
+          >
+            <Download className="h-4 w-4" />
+            {isDownloading ? "Downloading reference data..." : "Download reference data"}
+          </button>
+          {downloadStatus ? <span className="text-sm text-ink-600">{downloadStatus.progress}% · {downloadStatus.message}</span> : null}
+        </div>
+
+        {downloadError ? <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{downloadError}</div> : null}
+        {downloadStatus?.status === "completed" ? (
+          <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+            Imported {downloadStatus.dataset_name ?? "reference dataset"} with {downloadStatus.row_count} rows and {downloadStatus.column_count} columns.
+          </div>
+        ) : null}
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(280px,320px)]">

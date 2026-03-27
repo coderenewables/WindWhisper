@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.database import get_db
 from app.models import DataColumn
@@ -24,6 +25,9 @@ from app.schemas.mcp import (
     MCPMatrixOutputResponse,
     MCPMethod,
     MCPMonthlyMeanResponse,
+    MCPReferenceDownloadRequest,
+    MCPReferenceDownloadResponse,
+    MCPReferenceDownloadStatusResponse,
     MCPPredictedPointResponse,
     MCPPredictionRequest,
     MCPPredictionResponse,
@@ -32,6 +36,7 @@ from app.schemas.mcp import (
 )
 from app.services.mcp_engine import compare_mcp_methods, correlation_stats, mcp_linear_least_squares, mcp_matrix_method, mcp_summary, mcp_variance_ratio
 from app.services.qc_engine import get_clean_dataframe, get_dataset_or_404
+from app.services.reanalysis_download import ReferenceDownloadJob, create_download_task, get_download_task
 
 
 router = APIRouter(prefix="/api/mcp", tags=["mcp"])
@@ -198,6 +203,24 @@ def _serialize_matrix_outputs(
     return serialized
 
 
+def _serialize_download_status(payload: dict[str, object]) -> MCPReferenceDownloadStatusResponse:
+    return MCPReferenceDownloadStatusResponse(
+        task_id=payload["task_id"],
+        project_id=payload["project_id"],
+        source=payload["source"],
+        status=payload["status"],
+        message=str(payload["message"]),
+        progress=int(payload["progress"]),
+        dataset_id=payload.get("dataset_id"),
+        dataset_name=payload.get("dataset_name"),
+        row_count=int(payload.get("row_count", 0)),
+        column_count=int(payload.get("column_count", 0)),
+        error=payload.get("error"),
+        started_at=pd.Timestamp(payload["started_at"]).to_pydatetime(),
+        completed_at=pd.Timestamp(payload["completed_at"]).to_pydatetime() if payload.get("completed_at") else None,
+    )
+
+
 @router.post("/correlate", response_model=MCPCorrelationResponse)
 async def correlate(payload: MCPCorrelationRequest, db: AsyncSession = Depends(get_db)) -> MCPCorrelationResponse:
     _, site_series = await _load_numeric_series(db, payload.site_dataset_id, payload.site_column_id, payload.site_exclude_flags)
@@ -343,3 +366,42 @@ async def compare(payload: MCPComparisonRequest, db: AsyncSession = Depends(get_
         recommended_method=response_rows[0].method,
         results=response_rows,
     )
+
+
+@router.post("/download-reference", response_model=MCPReferenceDownloadResponse, status_code=status.HTTP_202_ACCEPTED)
+async def download_reference_data(
+    payload: MCPReferenceDownloadRequest,
+    db: AsyncSession = Depends(get_db),
+) -> MCPReferenceDownloadResponse:
+    if payload.end_year < payload.start_year:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="end_year must be greater than or equal to start_year")
+    if payload.source == "era5" and not payload.api_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ERA5 downloads require an EarthDataHub API key")
+
+    bind = db.bind
+    if bind is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database session is not bound to an engine")
+
+    session_factory = async_sessionmaker(bind=bind, class_=AsyncSession, expire_on_commit=False, autoflush=False)
+    task_id = await create_download_task(
+        ReferenceDownloadJob(
+            project_id=payload.project_id,
+            source=payload.source,
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            start_year=payload.start_year,
+            end_year=payload.end_year,
+            dataset_name=payload.dataset_name,
+            api_key=payload.api_key,
+        ),
+        session_factory,
+    )
+    return MCPReferenceDownloadResponse(task_id=task_id, status="queued", message="Reference download queued")
+
+
+@router.get("/download-status/{task_id}", response_model=MCPReferenceDownloadStatusResponse)
+async def get_reference_download_status(task_id: uuid.UUID) -> MCPReferenceDownloadStatusResponse:
+    task = await get_download_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Reference download task not found")
+    return _serialize_download_status(task)

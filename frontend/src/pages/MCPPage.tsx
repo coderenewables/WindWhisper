@@ -2,11 +2,18 @@ import { AlertTriangle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { getMcpComparison, getMcpCorrelation, getMcpPrediction } from "../api/analysis";
+import { downloadMcpReferenceData, getMcpComparison, getMcpCorrelation, getMcpDownloadStatus, getMcpPrediction } from "../api/analysis";
 import { getDataset, listProjectDatasets } from "../api/datasets";
 import { MCPWorkspace } from "../components/mcp/MCPWorkspace";
 import { useProjectStore } from "../stores/projectStore";
-import type { MCPComparisonResponse, MCPCorrelationResponse, MCPMethod, MCPPredictionResponse } from "../types/analysis";
+import type {
+  MCPComparisonResponse,
+  MCPCorrelationResponse,
+  MCPMethod,
+  MCPPredictionResponse,
+  MCPReferenceDataSource,
+  MCPReferenceDownloadStatusResponse,
+} from "../types/analysis";
 import type { DatasetDetail, DatasetSummary } from "../types/dataset";
 
 function getDefaultReferenceDataset(datasets: DatasetSummary[], currentSiteDatasetId: string) {
@@ -14,7 +21,7 @@ function getDefaultReferenceDataset(datasets: DatasetSummary[], currentSiteDatas
   if (reanalysisDataset) {
     return reanalysisDataset.id;
   }
-  return datasets.find((dataset) => dataset.id !== currentSiteDatasetId)?.id ?? datasets[0]?.id ?? "";
+  return datasets.find((dataset) => dataset.id !== currentSiteDatasetId)?.id ?? "";
 }
 
 function getDefaultSpeedColumnId(datasetDetail: DatasetDetail | null) {
@@ -24,6 +31,14 @@ function getDefaultSpeedColumnId(datasetDetail: DatasetDetail | null) {
 function getValidExtraColumns(datasetDetail: DatasetDetail | null, primaryColumnId: string, selectedColumnIds: string[]) {
   const validIds = new Set((datasetDetail?.columns ?? []).filter((column) => column.measurement_type === "speed").map((column) => column.id));
   return selectedColumnIds.filter((columnId) => columnId !== primaryColumnId && validIds.has(columnId));
+}
+
+function getDefaultYearRange() {
+  const currentYear = new Date().getUTCFullYear();
+  return {
+    startYear: String(currentYear - 20),
+    endYear: String(currentYear),
+  };
 }
 
 export function MCPPage() {
@@ -42,6 +57,18 @@ export function MCPPage() {
   const [correlationData, setCorrelationData] = useState<MCPCorrelationResponse | null>(null);
   const [comparisonData, setComparisonData] = useState<MCPComparisonResponse | null>(null);
   const [predictionData, setPredictionData] = useState<MCPPredictionResponse | null>(null);
+  const [downloadSource, setDownloadSource] = useState<MCPReferenceDataSource>("era5");
+  const [downloadLatitude, setDownloadLatitude] = useState("");
+  const [downloadLongitude, setDownloadLongitude] = useState("");
+  const [downloadStartYear, setDownloadStartYear] = useState(getDefaultYearRange().startYear);
+  const [downloadEndYear, setDownloadEndYear] = useState(getDefaultYearRange().endYear);
+  const [downloadDatasetName, setDownloadDatasetName] = useState("");
+  const [downloadApiKey, setDownloadApiKey] = useState("");
+  const [downloadTaskId, setDownloadTaskId] = useState<string | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<MCPReferenceDownloadStatusResponse | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [datasetReloadToken, setDatasetReloadToken] = useState(0);
   const [pageError, setPageError] = useState<string | null>(null);
   const [correlationError, setCorrelationError] = useState<string | null>(null);
   const [predictionError, setPredictionError] = useState<string | null>(null);
@@ -113,7 +140,7 @@ export function MCPPage() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, refDatasetId, searchParams, setSearchParams, siteDatasetId]);
+  }, [datasetReloadToken, projectId, refDatasetId, searchParams, setSearchParams, siteDatasetId]);
 
   useEffect(() => {
     if (!siteDatasetId) {
@@ -178,6 +205,16 @@ export function MCPPage() {
   }, [refColumnId, refDatasetId]);
 
   const activeProject = projects.find((project) => project.id === projectId) ?? null;
+
+  useEffect(() => {
+    if (activeProject?.latitude != null) {
+      setDownloadLatitude((current) => current || String(activeProject.latitude));
+    }
+    if (activeProject?.longitude != null) {
+      setDownloadLongitude((current) => current || String(activeProject.longitude));
+    }
+  }, [activeProject?.latitude, activeProject?.longitude]);
+
   const payloadBase = useMemo(() => ({
     site_dataset_id: siteDatasetId,
     site_column_id: siteColumnId,
@@ -186,6 +223,62 @@ export function MCPPage() {
     ref_column_id: refColumnId,
     ref_column_ids: extraRefColumnIds,
   }), [extraRefColumnIds, extraSiteColumnIds, refColumnId, refDatasetId, siteColumnId, siteDatasetId]);
+
+  useEffect(() => {
+    if (!downloadTaskId) {
+      return;
+    }
+    const taskId = downloadTaskId;
+
+    let cancelled = false;
+    let timeoutId: number | undefined;
+
+    async function pollStatus() {
+      try {
+        const status = await getMcpDownloadStatus(taskId);
+        if (cancelled) {
+          return;
+        }
+
+        setDownloadStatus(status);
+        setIsDownloading(status.status === "queued" || status.status === "running");
+
+        if (status.status === "completed") {
+          setDatasetReloadToken((value) => value + 1);
+          if (status.dataset_id) {
+            updateSearch(siteDatasetId, status.dataset_id);
+          }
+          setDownloadTaskId(null);
+          return;
+        }
+
+        if (status.status === "failed") {
+          setDownloadError(status.error ?? status.message);
+          setDownloadTaskId(null);
+          return;
+        }
+
+        timeoutId = window.setTimeout(() => {
+          void pollStatus();
+        }, 1200);
+      } catch (error) {
+        if (!cancelled) {
+          setDownloadError(error instanceof Error ? error.message : "Unable to check download status");
+          setIsDownloading(false);
+          setDownloadTaskId(null);
+        }
+      }
+    }
+
+    void pollStatus();
+
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [downloadTaskId, siteDatasetId]);
 
   function updateSearch(nextSiteDatasetId: string, nextRefDatasetId: string) {
     const nextParams = new URLSearchParams(searchParams);
@@ -237,6 +330,66 @@ export function MCPPage() {
     }
   }
 
+  async function startDownload() {
+    const latitude = Number(downloadLatitude);
+    const longitude = Number(downloadLongitude);
+    const startYear = Number(downloadStartYear);
+    const endYear = Number(downloadEndYear);
+
+    if (!projectId) {
+      setDownloadError("Select a project before downloading reference data");
+      return;
+    }
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      setDownloadError("Latitude and longitude must be valid numbers");
+      return;
+    }
+    if (!Number.isInteger(startYear) || !Number.isInteger(endYear)) {
+      setDownloadError("Start year and end year must be whole numbers");
+      return;
+    }
+    if (downloadSource === "era5" && !downloadApiKey.trim()) {
+      setDownloadError("ERA5 downloads require an EarthDataHub API key");
+      return;
+    }
+
+    setDownloadError(null);
+    setDownloadStatus(null);
+    setIsDownloading(true);
+
+    try {
+      const response = await downloadMcpReferenceData({
+        project_id: projectId,
+        source: downloadSource,
+        latitude,
+        longitude,
+        start_year: startYear,
+        end_year: endYear,
+        dataset_name: downloadDatasetName.trim() || undefined,
+        api_key: downloadSource === "era5" ? downloadApiKey.trim() : undefined,
+      });
+      setDownloadTaskId(response.task_id);
+      setDownloadStatus({
+        task_id: response.task_id,
+        project_id: projectId,
+        source: downloadSource,
+        status: response.status,
+        message: response.message,
+        progress: 0,
+        dataset_id: null,
+        dataset_name: null,
+        row_count: 0,
+        column_count: 0,
+        error: null,
+        started_at: new Date().toISOString(),
+        completed_at: null,
+      });
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : "Unable to start reference download");
+      setIsDownloading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {!projectId ? (
@@ -245,13 +398,13 @@ export function MCPPage() {
         </section>
       ) : null}
 
-      {projectId && datasets.length < 2 && !isLoadingDatasets ? (
+      {projectId && datasets.length < 1 && !isLoadingDatasets ? (
         <section className="panel-surface p-6">
           <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
-              <p className="font-medium text-amber-900">MCP needs at least two datasets</p>
-              <p className="mt-1">Import or create a reference dataset for this project before running measure-correlate-predict.</p>
+              <p className="font-medium text-amber-900">MCP needs a site dataset to start</p>
+              <p className="mt-1">Import at least one site dataset first. Reference downloads become available in the MCP workspace after that.</p>
               {activeProject ? (
                 <Link to={`/project/${activeProject.id}`} className="mt-3 inline-flex text-sm font-medium text-amber-900 underline decoration-amber-300 underline-offset-4">
                   Return to the project workspace
@@ -262,7 +415,7 @@ export function MCPPage() {
         </section>
       ) : null}
 
-      {projectId && (datasets.length >= 2 || isLoadingDatasets) ? (
+      {projectId && (datasets.length >= 1 || isLoadingDatasets) ? (
         <MCPWorkspace
           datasets={datasets}
           siteDatasetId={siteDatasetId}
@@ -277,6 +430,16 @@ export function MCPPage() {
           correlationData={correlationData}
           comparisonData={comparisonData}
           predictionData={predictionData}
+          downloadSource={downloadSource}
+          downloadLatitude={downloadLatitude}
+          downloadLongitude={downloadLongitude}
+          downloadStartYear={downloadStartYear}
+          downloadEndYear={downloadEndYear}
+          downloadDatasetName={downloadDatasetName}
+          downloadApiKey={downloadApiKey}
+          downloadStatus={downloadStatus}
+          downloadError={downloadError}
+          isDownloading={isDownloading}
           pageError={pageError}
           correlationError={correlationError}
           predictionError={predictionError}
@@ -309,6 +472,14 @@ export function MCPPage() {
           onExtraSiteColumnsChange={setExtraSiteColumnIds}
           onExtraRefColumnsChange={setExtraRefColumnIds}
           onMethodChange={setMethod}
+          onDownloadSourceChange={setDownloadSource}
+          onDownloadLatitudeChange={setDownloadLatitude}
+          onDownloadLongitudeChange={setDownloadLongitude}
+          onDownloadStartYearChange={setDownloadStartYear}
+          onDownloadEndYearChange={setDownloadEndYear}
+          onDownloadDatasetNameChange={setDownloadDatasetName}
+          onDownloadApiKeyChange={setDownloadApiKey}
+          onStartDownload={() => void startDownload()}
           onRunCorrelation={() => void runCorrelation()}
           onRunCompare={() => void runCompare()}
           onRunPrediction={() => void runPrediction()}

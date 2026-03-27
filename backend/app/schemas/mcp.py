@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 
 MCPMethod = Literal["linear", "variance_ratio", "matrix"]
+ReferenceDataSource = Literal["era5", "merra2"]
 
 
 class CorrelationPointResponse(BaseModel):
@@ -164,3 +165,36 @@ class MCPComparisonResponse(BaseModel):
     ref_excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
     recommended_method: MCPMethod
     results: list[MCPComparisonRowResponse] = Field(default_factory=list)
+
+
+class MCPReferenceDownloadRequest(BaseModel):
+    project_id: uuid.UUID
+    source: ReferenceDataSource
+    latitude: float = Field(ge=-90.0, le=90.0)
+    longitude: float = Field(ge=-180.0, le=180.0)
+    start_year: int = Field(ge=1950, le=2100)
+    end_year: int = Field(ge=1950, le=2100)
+    dataset_name: str | None = Field(default=None, min_length=1, max_length=255)
+    api_key: str | None = Field(default=None, min_length=1, max_length=512)
+
+
+class MCPReferenceDownloadResponse(BaseModel):
+    task_id: uuid.UUID
+    status: Literal["queued", "running", "completed", "failed"]
+    message: str
+
+
+class MCPReferenceDownloadStatusResponse(BaseModel):
+    task_id: uuid.UUID
+    project_id: uuid.UUID
+    source: ReferenceDataSource
+    status: Literal["queued", "running", "completed", "failed"]
+    message: str
+    progress: int = Field(ge=0, le=100)
+    dataset_id: uuid.UUID | None = None
+    dataset_name: str | None = None
+    row_count: int = 0
+    column_count: int = 0
+    error: str | None = None
+    started_at: datetime
+    completed_at: datetime | None = None
