@@ -8,6 +8,8 @@ import { QCPage } from "./QCPage";
 const qcMocks = vi.hoisted(() => ({
   listProjectDatasets: vi.fn(),
   getDataset: vi.fn(),
+  getDatasetHistory: vi.fn(),
+  undoDatasetChange: vi.fn(),
   listFlags: vi.fn(),
   listFlaggedRanges: vi.fn(),
   listFlagRules: vi.fn(),
@@ -24,6 +26,8 @@ const qcMocks = vi.hoisted(() => ({
 vi.mock("../api/datasets", () => ({
   listProjectDatasets: qcMocks.listProjectDatasets,
   getDataset: qcMocks.getDataset,
+  getDatasetHistory: qcMocks.getDatasetHistory,
+  undoDatasetChange: qcMocks.undoDatasetChange,
 }));
 
 vi.mock("../api/qc", () => ({
@@ -56,6 +60,10 @@ vi.mock("../components/timeseries/TimeSeriesChart", () => ({
 
 vi.mock("../components/qc/TowerShadowDetector", () => ({
   TowerShadowDetector: () => <div>Tower shadow stub</div>,
+}));
+
+vi.mock("../components/qc/GapFillPanel", () => ({
+  GapFillPanel: () => <div>Gap fill stub</div>,
 }));
 
 vi.mock("../stores/projectStore", () => ({
@@ -131,6 +139,31 @@ beforeEach(() => {
     },
   ]);
   qcMocks.listFlaggedRanges.mockResolvedValue([]);
+  qcMocks.getDatasetHistory.mockResolvedValue({
+    changes: [
+      {
+        id: "change-1",
+        dataset_id: "dataset-1",
+        action_type: "data_reconstructed",
+        description: "Reconstructed missing values for Speed 80m using interpolation overwrite.",
+        before_state: { save_mode: "overwrite" },
+        after_state: { save_mode: "overwrite" },
+        created_at: "2025-01-01T00:15:00Z",
+      },
+    ],
+    total: 1,
+  });
+  qcMocks.undoDatasetChange.mockResolvedValue({
+    undone_change: {
+      id: "change-1",
+      dataset_id: "dataset-1",
+      action_type: "data_reconstructed",
+      description: "Reconstructed missing values for Speed 80m using interpolation overwrite.",
+      before_state: { save_mode: "overwrite" },
+      after_state: { save_mode: "overwrite" },
+      created_at: "2025-01-01T00:15:00Z",
+    },
+  });
   qcMocks.listFlagRules.mockResolvedValue([
     {
       id: "rule-1",
@@ -216,4 +249,16 @@ test("removes a rule immediately while delete is in flight", async () => {
   });
 
   deferred.resolve(undefined);
+});
+
+test("undoes the latest change from the history panel", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/change timeline/i);
+  await user.click(screen.getByRole("button", { name: /undo latest change/i }));
+
+  await waitFor(() => {
+    expect(qcMocks.undoDatasetChange).toHaveBeenCalledWith("dataset-1");
+  });
 });

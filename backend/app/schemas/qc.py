@@ -113,6 +113,18 @@ class TowerShadowMethod(str, Enum):
     auto = "auto"
 
 
+class ReconstructionMethod(str, Enum):
+    interpolation = "interpolation"
+    knn = "knn"
+    correlation = "correlation"
+
+
+class ReconstructionSaveMode(str, Enum):
+    preview = "preview"
+    new_column = "new_column"
+    overwrite = "overwrite"
+
+
 class TowerShadowRequest(BaseModel):
     method: TowerShadowMethod
     boom_orientations: list[float] | None = None
@@ -145,3 +157,74 @@ class TowerShadowResponse(BaseModel):
     applied: bool = False
     flag_id: uuid.UUID | None = None
     flag_name: str | None = None
+
+
+class GapSegmentResponse(BaseModel):
+    start_time: datetime
+    end_time: datetime
+    duration_hours: float
+    num_missing: int
+
+
+class ReconstructionPreviewResponse(BaseModel):
+    timestamps: list[datetime] = Field(default_factory=list)
+    original_values: list[float | None] = Field(default_factory=list)
+    reconstructed_values: list[float | None] = Field(default_factory=list)
+    filled_mask: list[bool] = Field(default_factory=list)
+
+
+class ReconstructionSummaryResponse(BaseModel):
+    expected_step_seconds: int
+    gap_count: int
+    original_missing_count: int
+    filled_count: int
+    remaining_missing_count: int
+    fill_ratio_pct: float
+    recovery_before_pct: float
+    recovery_after_pct: float
+    original_mean: float | None = None
+    reconstructed_mean: float | None = None
+    original_std: float | None = None
+    reconstructed_std: float | None = None
+
+
+class ReconstructedColumnResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    unit: str | None = None
+    measurement_type: str | None = None
+    height_m: float | None = None
+
+
+class ReconstructionRequest(BaseModel):
+    column_id: uuid.UUID
+    method: ReconstructionMethod
+    save_mode: ReconstructionSaveMode = ReconstructionSaveMode.preview
+    predictor_column_ids: list[uuid.UUID] = Field(default_factory=list)
+    reference_dataset_id: uuid.UUID | None = None
+    reference_column_id: uuid.UUID | None = None
+    max_gap_hours: int = Field(default=6, ge=1, le=168)
+    n_neighbors: int = Field(default=5, ge=1, le=50)
+    new_column_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @model_validator(mode="after")
+    def validate_reconstruction_request(self) -> "ReconstructionRequest":
+        if self.method == ReconstructionMethod.correlation and self.reference_column_id is None:
+            raise ValueError("reference_column_id is required for correlation reconstruction")
+        if self.save_mode == ReconstructionSaveMode.new_column and not self.new_column_name:
+            self.new_column_name = None
+        return self
+
+
+class ReconstructionResponse(BaseModel):
+    dataset_id: uuid.UUID
+    column_id: uuid.UUID
+    method: ReconstructionMethod
+    save_mode: ReconstructionSaveMode
+    predictor_column_ids: list[uuid.UUID] = Field(default_factory=list)
+    reference_dataset_id: uuid.UUID | None = None
+    reference_column_id: uuid.UUID | None = None
+    gaps: list[GapSegmentResponse] = Field(default_factory=list)
+    preview: ReconstructionPreviewResponse
+    summary: ReconstructionSummaryResponse
+    saved_column: ReconstructedColumnResponse | None = None

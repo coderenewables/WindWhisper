@@ -1,4 +1,5 @@
 import { apiClient } from "./client";
+import type { ChangeLogListResponse, UndoResponse } from "../types/history";
 import type {
   ConfirmImportPayload,
   DatasetDetail,
@@ -73,6 +74,16 @@ export async function getDatasetTimeseries(datasetId: string, query: DatasetTime
       exclude_flags: query.exclude_flags?.length ? query.exclude_flags.join(",") : undefined,
     },
   });
+  return response.data;
+}
+
+export async function getDatasetHistory(datasetId: string): Promise<ChangeLogListResponse> {
+  const response = await apiClient.get<ChangeLogListResponse>(`/datasets/${datasetId}/history`);
+  return response.data;
+}
+
+export async function undoDatasetChange(datasetId: string): Promise<UndoResponse> {
+  const response = await apiClient.post<UndoResponse>(`/datasets/${datasetId}/undo`);
   return response.data;
 }
 

@@ -13,6 +13,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.analysis_result import AnalysisResult
+    from app.models.change_log import ChangeLog
     from app.models.flag import Flag
     from app.models.project import Project
     from app.models.timeseries import TimeseriesData
@@ -59,6 +60,10 @@ class Dataset(Base):
         cascade="all, delete-orphan",
     )
     analysis_results: Mapped[list["AnalysisResult"]] = relationship(
+        back_populates="dataset",
+        cascade="all, delete-orphan",
+    )
+    change_logs: Mapped[list["ChangeLog"]] = relationship(
         back_populates="dataset",
         cascade="all, delete-orphan",
     )

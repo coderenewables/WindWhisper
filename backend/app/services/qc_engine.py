@@ -47,6 +47,7 @@ async def get_flag_or_404(db: AsyncSession, flag_id: uuid.UUID) -> Flag:
         select(Flag)
         .options(selectinload(Flag.rules), selectinload(Flag.ranges), selectinload(Flag.dataset).selectinload(Dataset.columns))
         .where(Flag.id == flag_id)
+        .execution_options(populate_existing=True)
     )
     flag = (await db.execute(statement)).scalar_one_or_none()
     if flag is None:
@@ -55,7 +56,12 @@ async def get_flag_or_404(db: AsyncSession, flag_id: uuid.UUID) -> Flag:
 
 
 async def get_dataset_or_404(db: AsyncSession, dataset_id: uuid.UUID) -> Dataset:
-    statement = select(Dataset).options(selectinload(Dataset.columns), selectinload(Dataset.flags)).where(Dataset.id == dataset_id)
+    statement = (
+        select(Dataset)
+        .options(selectinload(Dataset.columns), selectinload(Dataset.flags))
+        .where(Dataset.id == dataset_id)
+        .execution_options(populate_existing=True)
+    )
     dataset = (await db.execute(statement)).scalar_one_or_none()
     if dataset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")

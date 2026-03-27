@@ -80,3 +80,69 @@ export interface TowerShadowResponse {
   flag_id: string | null;
   flag_name: string | null;
 }
+
+export type ReconstructionMethod = "interpolation" | "knn" | "correlation";
+export type ReconstructionSaveMode = "preview" | "new_column" | "overwrite";
+
+export interface GapSegment {
+  start_time: string;
+  end_time: string;
+  duration_hours: number;
+  num_missing: number;
+}
+
+export interface ReconstructionPreview {
+  timestamps: string[];
+  original_values: Array<number | null>;
+  reconstructed_values: Array<number | null>;
+  filled_mask: boolean[];
+}
+
+export interface ReconstructionSummary {
+  expected_step_seconds: number;
+  gap_count: number;
+  original_missing_count: number;
+  filled_count: number;
+  remaining_missing_count: number;
+  fill_ratio_pct: number;
+  recovery_before_pct: number;
+  recovery_after_pct: number;
+  original_mean: number | null;
+  reconstructed_mean: number | null;
+  original_std: number | null;
+  reconstructed_std: number | null;
+}
+
+export interface ReconstructedColumn {
+  id: string;
+  name: string;
+  unit: string | null;
+  measurement_type: string | null;
+  height_m: number | null;
+}
+
+export interface ReconstructionRequestPayload {
+  column_id: string;
+  method: ReconstructionMethod;
+  save_mode?: ReconstructionSaveMode;
+  predictor_column_ids?: string[];
+  reference_dataset_id?: string | null;
+  reference_column_id?: string | null;
+  max_gap_hours?: number;
+  n_neighbors?: number;
+  new_column_name?: string | null;
+}
+
+export interface ReconstructionResponse {
+  dataset_id: string;
+  column_id: string;
+  method: ReconstructionMethod;
+  save_mode: ReconstructionSaveMode;
+  predictor_column_ids: string[];
+  reference_dataset_id: string | null;
+  reference_column_id: string | null;
+  gaps: GapSegment[];
+  preview: ReconstructionPreview;
+  summary: ReconstructionSummary;
+  saved_column: ReconstructedColumn | null;
+}

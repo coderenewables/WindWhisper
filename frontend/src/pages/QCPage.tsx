@@ -2,7 +2,7 @@ import { AlertTriangle, ShieldCheck } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { getDataset, listProjectDatasets } from "../api/datasets";
+import { getDataset, getDatasetHistory, listProjectDatasets, undoDatasetChange } from "../api/datasets";
 import {
   applyFlagRules,
   createFlag,
@@ -16,10 +16,12 @@ import {
   listFlags,
   updateFlagRule,
 } from "../api/qc";
+import { HistoryPanel } from "../components/common/HistoryPanel";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { Modal } from "../components/common/Modal";
 import { FlagManager } from "../components/qc/FlagManager";
 import { FlagRuleEditor } from "../components/qc/FlagRuleEditor";
+import { GapFillPanel } from "../components/qc/GapFillPanel";
 import { QCDashboard } from "../components/qc/QCDashboard";
 import { TowerShadowDetector } from "../components/qc/TowerShadowDetector";
 import { ChannelSelector } from "../components/timeseries/ChannelSelector";
@@ -28,7 +30,8 @@ import { TimeSeriesControls } from "../components/timeseries/TimeSeriesControls"
 import { useTimeSeries } from "../hooks/useTimeSeries";
 import { useProjectStore } from "../stores/projectStore";
 import type { DatasetDetail, DatasetSummary } from "../types/dataset";
-import type { Flag, FlagRule, FlaggedRange } from "../types/qc";
+import type { ChangeLogEntry } from "../types/history";
+import type { Flag, FlagRule, FlaggedRange, ReconstructionResponse } from "../types/qc";
 
 const chartPalette = ["#1f8f84", "#f06f32", "#2563eb", "#7c3aed", "#059669", "#dc2626", "#0891b2", "#ca8a04"];
 
@@ -63,9 +66,13 @@ export function QCPage() {
   const [flagVisibility, setFlagVisibility] = useState<Record<string, boolean>>({});
   const [manualRange, setManualRange] = useState<{ start: string; end: string } | null>(null);
   const [manualFlagId, setManualFlagId] = useState("");
+  const [timeseriesReloadKey, setTimeseriesReloadKey] = useState(0);
+  const [historyChanges, setHistoryChanges] = useState<ChangeLogEntry[]>([]);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
   const [isLoadingDatasetDetail, setIsLoadingDatasetDetail] = useState(false);
   const [isLoadingQc, setIsLoadingQc] = useState(false);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isUndoingHistory, setIsUndoingHistory] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
   const { projects, fetchProjects } = useProjectStore();
 
@@ -179,9 +186,34 @@ export function QCPage() {
     }
   }
 
+  async function refreshHistory(nextDatasetId: string) {
+    setIsLoadingHistory(true);
+    setPageError(null);
+    try {
+      const response = await getDatasetHistory(nextDatasetId);
+      setHistoryChanges(response.changes);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Unable to load change history");
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
+
+  async function refreshWorkspace(nextDatasetId: string, preferredFlagId?: string | null) {
+    const refreshedDataset = await getDataset(nextDatasetId);
+    setDatasetDetail(refreshedDataset);
+    setSelectedColumnIds((current) => {
+      const valid = current.filter((columnId) => refreshedDataset.columns.some((column) => column.id === columnId));
+      return valid.length > 0 ? valid : defaultColumnSelection(refreshedDataset);
+    });
+    await Promise.all([refreshQcState(nextDatasetId, preferredFlagId), refreshHistory(nextDatasetId)]);
+    setTimeseriesReloadKey((current) => current + 1);
+  }
+
   useEffect(() => {
     if (datasetId) {
       void refreshQcState(datasetId, null);
+      void refreshHistory(datasetId);
     }
   }, [datasetId]);
 
@@ -228,7 +260,39 @@ export function QCPage() {
     fullStart: datasetDetail?.start_time ?? null,
     fullEnd: datasetDetail?.end_time ?? null,
     excludedFlagIds: [],
+    reloadKey: timeseriesReloadKey,
   });
+
+  async function handleReconstructionSaved(response: ReconstructionResponse) {
+    if (!datasetDetail) {
+      return;
+    }
+
+    const refreshed = await getDataset(datasetDetail.id);
+    setDatasetDetail(refreshed);
+    if (response.saved_column && response.save_mode === "new_column") {
+      setSelectedColumnIds((current) => (current.includes(response.saved_column!.id) ? current : [...current, response.saved_column!.id]));
+    }
+    await refreshHistory(datasetDetail.id);
+    setTimeseriesReloadKey((current) => current + 1);
+  }
+
+  async function handleUndoLatestChange() {
+    if (!datasetDetail) {
+      return;
+    }
+
+    setIsUndoingHistory(true);
+    setPageError(null);
+    try {
+      await undoDatasetChange(datasetDetail.id);
+      await refreshWorkspace(datasetDetail.id, activeFlagId);
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Unable to undo the latest change");
+    } finally {
+      setIsUndoingHistory(false);
+    }
+  }
 
   function updateSearch(next: { projectId?: string; datasetId?: string }) {
     const nextParams = new URLSearchParams(searchParams);
@@ -335,6 +399,7 @@ export function QCPage() {
                   columns={datasetDetail.columns}
                   onApplied={async (flagId) => {
                     await refreshQcState(datasetDetail.id, flagId);
+                    await refreshHistory(datasetDetail.id);
                   }}
                 />
                 <FlagManager
@@ -351,6 +416,7 @@ export function QCPage() {
                     }
                     const created = await createFlag(datasetDetail.id, payload);
                     await refreshQcState(datasetDetail.id, created.id);
+                    await refreshHistory(datasetDetail.id);
                   }}
                   onApplyRules={async (flagId) => {
                     if (!datasetDetail) {
@@ -358,6 +424,7 @@ export function QCPage() {
                     }
                     await applyFlagRules(flagId);
                     await refreshQcState(datasetDetail.id, flagId);
+                    await refreshHistory(datasetDetail.id);
                   }}
                   onDeleteFlag={async (flagId) => {
                     if (!datasetDetail) {
@@ -365,6 +432,7 @@ export function QCPage() {
                     }
                     await deleteFlag(flagId);
                     await refreshQcState(datasetDetail.id, activeFlagId === flagId ? null : activeFlagId);
+                    await refreshHistory(datasetDetail.id);
                   }}
                   onDeleteRange={async (rangeId) => {
                     if (!datasetDetail) {
@@ -372,6 +440,7 @@ export function QCPage() {
                     }
                     await deleteFlaggedRange(rangeId);
                     await refreshQcState(datasetDetail.id, activeFlagId);
+                    await refreshHistory(datasetDetail.id);
                   }}
                 />
                 <FlagRuleEditor
@@ -474,6 +543,20 @@ export function QCPage() {
               </>
             }
           />
+
+          <GapFillPanel
+            datasetId={datasetDetail.id}
+            datasets={datasets}
+            columns={datasetDetail.columns}
+            onSaved={handleReconstructionSaved}
+          />
+
+          <HistoryPanel
+            changes={historyChanges}
+            isLoading={isLoadingHistory}
+            isUndoing={isUndoingHistory}
+            onUndoLatest={handleUndoLatestChange}
+          />
         </>
       ) : projectId && (isLoadingDatasetDetail || isLoadingDatasets) ? (
         <section className="panel-surface p-6"><LoadingSpinner label="Loading QC workspace" /></section>
@@ -506,6 +589,7 @@ export function QCPage() {
                 void createManualFlaggedRange(manualFlagId, { start_time: manualRange.start, end_time: manualRange.end, column_ids: selectedColumnIds.length > 0 ? selectedColumnIds : undefined })
                   .then(async () => {
                     await refreshQcState(datasetDetail.id, manualFlagId);
+                    await refreshHistory(datasetDetail.id);
                     setManualRange(null);
                   })
                   .catch((requestError: unknown) => setPageError(requestError instanceof Error ? requestError.message : "Unable to create manual flagged range"));

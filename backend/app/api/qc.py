@@ -16,10 +16,24 @@ from app.schemas.qc import (
     FlagRuleCreate,
     FlagRuleResponse,
     FlagRuleUpdate,
+    ReconstructedColumnResponse,
+    ReconstructionPreviewResponse,
+    ReconstructionRequest,
+    ReconstructionResponse,
+    ReconstructionSaveMode,
+    ReconstructionSummaryResponse,
     ManualFlagRequest,
     TowerShadowRequest,
     TowerShadowResponse,
     TowerShadowSectorResponse,
+)
+from app.services.data_reconstruction import build_reconstruction_payload, persist_reconstruction, run_reconstruction
+from app.services.history import (
+    FLAG_APPLIED_ACTION_TYPE,
+    FLAG_REMOVED_ACTION_TYPE,
+    record_change,
+    serialize_flag_snapshot,
+    serialize_flagged_range_snapshot,
 )
 from app.services.qc_engine import apply_rules, get_dataset_or_404, get_flag_or_404, get_flagged_range_or_404
 from app.services.tower_shadow import detect_tower_shadow
@@ -62,6 +76,16 @@ def _serialize_flagged_range(flagged_range: FlaggedRange) -> FlaggedRangeRespons
         end_time=flagged_range.end_time,
         applied_by=flagged_range.applied_by,
         column_ids=flagged_range.column_ids,
+    )
+
+
+def _serialize_column(column: DataColumn) -> ReconstructedColumnResponse:
+    return ReconstructedColumnResponse(
+        id=column.id,
+        name=column.name,
+        unit=column.unit,
+        measurement_type=column.measurement_type,
+        height_m=column.height_m,
     )
 
 
@@ -125,6 +149,15 @@ async def list_flags(dataset_id: uuid.UUID, db: DbSession) -> list[FlagResponse]
 @router.delete("/flags/{flag_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_flag(flag_id: uuid.UUID, db: DbSession) -> Response:
     flag = await get_flag_or_404(db, flag_id)
+    snapshot = serialize_flag_snapshot(flag)
+    await record_change(
+        db,
+        flag.dataset_id,
+        action_type=FLAG_REMOVED_ACTION_TYPE,
+        description=f"Removed flag {flag.name} and its associated ranges.",
+        before_state={"mode": "flag_remove", "flag": snapshot},
+        after_state={"mode": "flag_remove", "flag_id": str(flag.id)},
+    )
     await db.delete(flag)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -229,13 +262,32 @@ async def create_manual_flagged_range(flag_id: uuid.UUID, payload: ManualFlagReq
     db.add(flagged_range)
     await db.commit()
     await db.refresh(flagged_range)
+    await record_change(
+        db,
+        flag.dataset_id,
+        action_type=FLAG_APPLIED_ACTION_TYPE,
+        description=f"Applied manual flag {flag.name} to the selected time range.",
+        before_state={"mode": "range_add", "flag_id": str(flag.id), "ranges_added": [serialize_flagged_range_snapshot(flagged_range)]},
+        after_state={"mode": "range_add", "flag_id": str(flag.id), "ranges": [serialize_flagged_range_snapshot(flagged_range)]},
+    )
+    await db.commit()
     return _serialize_flagged_range(flagged_range)
 
 
 @router.post("/flags/{flag_id}/apply-rules", response_model=list[FlaggedRangeResponse])
 async def apply_flag_rules(flag_id: uuid.UUID, db: DbSession) -> list[FlaggedRangeResponse]:
     flag = await get_flag_or_404(db, flag_id)
+    previous_auto_ranges = [serialize_flagged_range_snapshot(flagged_range) for flagged_range in flag.ranges if flagged_range.applied_by == "auto"]
     flagged_ranges = await apply_rules(db, flag.dataset_id, flag.id)
+    await record_change(
+        db,
+        flag.dataset_id,
+        action_type=FLAG_APPLIED_ACTION_TYPE,
+        description=f"Applied automatic QC rules for {flag.name}.",
+        before_state={"mode": "auto_ranges_replace", "flag_id": str(flag.id), "ranges": previous_auto_ranges},
+        after_state={"mode": "auto_ranges_replace", "flag_id": str(flag.id), "ranges": [serialize_flagged_range_snapshot(flagged_range) for flagged_range in flagged_ranges]},
+    )
+    await db.commit()
     return [_serialize_flagged_range(flagged_range) for flagged_range in flagged_ranges]
 
 
@@ -256,6 +308,16 @@ async def list_dataset_flagged_ranges(dataset_id: uuid.UUID, db: DbSession) -> l
 @router.delete("/flagged-ranges/{range_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_flagged_range(range_id: uuid.UUID, db: DbSession) -> Response:
     flagged_range = await get_flagged_range_or_404(db, range_id)
+    flag = await get_flag_or_404(db, flagged_range.flag_id)
+    snapshot = serialize_flagged_range_snapshot(flagged_range)
+    await record_change(
+        db,
+        flag.dataset_id,
+        action_type=FLAG_REMOVED_ACTION_TYPE,
+        description=f"Removed flagged range from {flag.name}.",
+        before_state={"mode": "range_remove", "range": snapshot},
+        after_state={"mode": "range_remove", "range_id": str(flagged_range.id)},
+    )
     await db.delete(flagged_range)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -272,13 +334,15 @@ async def tower_shadow_detection(dataset_id: uuid.UUID, payload: TowerShadowRequ
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No tower shadow sectors detected to apply")
 
         existing_flag = next((flag for flag in dataset.flags if flag.name == payload.flag_name), None)
-        flag = existing_flag or Flag(
+        loaded_existing_flag = await get_flag_or_404(db, existing_flag.id) if existing_flag is not None else None
+        previous_flag_snapshot = serialize_flag_snapshot(loaded_existing_flag) if loaded_existing_flag is not None else None
+        flag = loaded_existing_flag or Flag(
             dataset_id=dataset_id,
             name=payload.flag_name,
             color="#b45309",
             description=f"Tower shadow flag generated by {payload.method.value} detection.",
         )
-        if existing_flag is None:
+        if loaded_existing_flag is None:
             db.add(flag)
             await db.flush()
         else:
@@ -302,6 +366,16 @@ async def tower_shadow_detection(dataset_id: uuid.UUID, payload: TowerShadowRequ
                 )
         await db.commit()
         await db.refresh(flag)
+        applied_flag = await get_flag_or_404(db, flag.id)
+        await record_change(
+            db,
+            dataset_id,
+            action_type=FLAG_APPLIED_ACTION_TYPE,
+            description=f"Applied tower shadow detection to {flag.name}.",
+            before_state={"mode": "flag_state_replace", "flag": previous_flag_snapshot},
+            after_state={"mode": "flag_state_replace", "flag": serialize_flag_snapshot(applied_flag)},
+        )
+        await db.commit()
         flag_id = flag.id
 
     return TowerShadowResponse(
@@ -312,4 +386,60 @@ async def tower_shadow_detection(dataset_id: uuid.UUID, payload: TowerShadowRequ
         applied=payload.apply,
         flag_id=flag_id,
         flag_name=payload.flag_name if payload.apply else None,
+    )
+
+
+@router.post("/reconstruct/{dataset_id}", response_model=ReconstructionResponse)
+async def reconstruct_dataset_column(
+    dataset_id: uuid.UUID,
+    payload: ReconstructionRequest,
+    db: DbSession,
+) -> ReconstructionResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    target_column = next((column for column in dataset.columns if column.id == payload.column_id), None)
+    if target_column is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="column_id does not belong to this dataset")
+
+    predictor_column_ids = [column_id for column_id in payload.predictor_column_ids if column_id != payload.column_id]
+    dataset_column_ids = {column.id for column in dataset.columns}
+    if any(column_id not in dataset_column_ids for column_id in predictor_column_ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="predictor_column_ids must belong to the same dataset")
+
+    result = await run_reconstruction(
+        db,
+        dataset,
+        target_column,
+        method=payload.method,
+        predictor_column_ids=predictor_column_ids,
+        reference_dataset_id=payload.reference_dataset_id,
+        reference_column_id=payload.reference_column_id,
+        max_gap_hours=payload.max_gap_hours,
+        n_neighbors=payload.n_neighbors,
+    )
+    payload_data = build_reconstruction_payload(result)
+
+    saved_column = None
+    if payload.save_mode != ReconstructionSaveMode.preview:
+        saved_column = await persist_reconstruction(
+            db,
+            dataset,
+            target_column,
+            result,
+            method=payload.method,
+            save_mode=payload.save_mode,
+            new_column_name=payload.new_column_name,
+        )
+
+    return ReconstructionResponse(
+        dataset_id=dataset.id,
+        column_id=target_column.id,
+        method=payload.method,
+        save_mode=payload.save_mode,
+        predictor_column_ids=predictor_column_ids,
+        reference_dataset_id=payload.reference_dataset_id,
+        reference_column_id=payload.reference_column_id,
+        gaps=payload_data["gaps"],
+        preview=ReconstructionPreviewResponse(**payload_data["preview"]),
+        summary=ReconstructionSummaryResponse(**payload_data["summary"]),
+        saved_column=_serialize_column(saved_column) if saved_column is not None else None,
     )

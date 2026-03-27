@@ -346,3 +346,272 @@ async def test_auto_tower_shadow_detects_shadow_sector(client: AsyncClient, db_s
     assert payload["preview_point_count"] >= 5
     assert len(payload["sectors"]) >= 1
     assert set(payload["sectors"][0]["affected_column_ids"]) == {str(speed_a.id), str(speed_b.id)}
+
+
+async def _seed_reconstruction_dataset(db_session: AsyncSession) -> tuple[Project, Dataset, DataColumn, DataColumn]:
+    project = Project(name="Reconstruction Site")
+    db_session.add(project)
+    await db_session.flush()
+
+    dataset = Dataset(
+        project_id=project.id,
+        name="Gap Fill Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=datetime(2025, 3, 1, 0, 0, tzinfo=UTC),
+        end_time=datetime(2025, 3, 1, 0, 50, tzinfo=UTC),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    target_column = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80, unit="m/s")
+    reference_column = DataColumn(dataset_id=dataset.id, name="RefSpeed_80m", measurement_type="speed", height_m=80, unit="m/s")
+    db_session.add_all([target_column, reference_column])
+    await db_session.flush()
+
+    base_time = datetime(2025, 3, 1, 0, 0, tzinfo=UTC)
+    rows = [
+        (0, {"Speed_80m": 2.0, "RefSpeed_80m": 4.0}),
+        (10, {"Speed_80m": 4.0, "RefSpeed_80m": 8.0}),
+        (30, {"Speed_80m": None, "RefSpeed_80m": 12.0}),
+        (40, {"Speed_80m": 8.0, "RefSpeed_80m": 16.0}),
+        (50, {"Speed_80m": 10.0, "RefSpeed_80m": 20.0}),
+    ]
+    db_session.add_all(
+        [
+            TimeseriesData(dataset_id=dataset.id, timestamp=base_time + timedelta(minutes=offset), values_json=row)
+            for offset, row in rows
+        ],
+    )
+    await db_session.commit()
+    return project, dataset, target_column, reference_column
+
+
+async def test_reconstruction_preview_reports_gaps_and_fills(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, target_column, _ = await _seed_reconstruction_dataset(db_session)
+
+    response = await client.post(
+        f"/api/qc/reconstruct/{dataset.id}",
+        json={
+            "column_id": str(target_column.id),
+            "method": "interpolation",
+            "save_mode": "preview",
+            "max_gap_hours": 6,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["save_mode"] == "preview"
+    assert payload["summary"]["gap_count"] == 1
+    assert payload["summary"]["filled_count"] == 2
+    assert payload["summary"]["remaining_missing_count"] == 0
+    assert payload["gaps"][0]["start_time"] == "2025-03-01T00:20:00Z"
+    assert payload["gaps"][0]["end_time"] == "2025-03-01T00:30:00Z"
+    assert payload["saved_column"] is None
+    assert any(payload["preview"]["filled_mask"])
+
+
+async def test_reconstruction_can_save_new_column_and_insert_missing_rows(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, target_column, _ = await _seed_reconstruction_dataset(db_session)
+
+    response = await client.post(
+        f"/api/qc/reconstruct/{dataset.id}",
+        json={
+            "column_id": str(target_column.id),
+            "method": "interpolation",
+            "save_mode": "new_column",
+            "new_column_name": "Speed_80m_reconstructed",
+            "max_gap_hours": 6,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["saved_column"]["name"] == "Speed_80m_reconstructed"
+    assert payload["summary"]["filled_count"] == 2
+
+    dataset_response = await client.get(f"/api/datasets/{dataset.id}")
+    assert dataset_response.status_code == 200
+    dataset_payload = dataset_response.json()
+    assert any(column["name"] == "Speed_80m_reconstructed" for column in dataset_payload["columns"])
+
+    timeseries_response = await client.get(f"/api/datasets/{dataset.id}/timeseries")
+    assert timeseries_response.status_code == 200
+    series_payload = timeseries_response.json()
+    saved_column_id = payload["saved_column"]["id"]
+    assert len(series_payload["timestamps"]) == 6
+    assert saved_column_id in series_payload["columns"]
+    assert series_payload["columns"][saved_column_id]["values"][2] is not None
+    assert series_payload["columns"][saved_column_id]["values"][3] is not None
+
+
+async def test_correlation_reconstruction_preview_uses_reference_column(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, target_column, reference_column = await _seed_reconstruction_dataset(db_session)
+
+    response = await client.post(
+        f"/api/qc/reconstruct/{dataset.id}",
+        json={
+            "column_id": str(target_column.id),
+            "method": "correlation",
+            "save_mode": "preview",
+            "reference_column_id": str(reference_column.id),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["method"] == "correlation"
+    assert payload["reference_column_id"] == str(reference_column.id)
+    assert payload["summary"]["filled_count"] == 2
+    assert payload["summary"]["remaining_missing_count"] == 0
+
+
+async def test_reconstruction_overwrite_is_recorded_and_can_be_undone(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, target_column, _ = await _seed_reconstruction_dataset(db_session)
+
+    overwrite_response = await client.post(
+        f"/api/qc/reconstruct/{dataset.id}",
+        json={
+            "column_id": str(target_column.id),
+            "method": "interpolation",
+            "save_mode": "overwrite",
+            "max_gap_hours": 6,
+        },
+    )
+
+    assert overwrite_response.status_code == 200
+    overwrite_payload = overwrite_response.json()
+    assert overwrite_payload["save_mode"] == "overwrite"
+    assert overwrite_payload["summary"]["filled_count"] == 2
+
+    history_response = await client.get(f"/api/datasets/{dataset.id}/history")
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total"] == 1
+    assert history_payload["changes"][0]["action_type"] == "data_reconstructed"
+    assert history_payload["changes"][0]["before_state"]["save_mode"] == "overwrite"
+    assert len(history_payload["changes"][0]["before_state"]["changes"]) == 2
+
+    timeseries_after_overwrite = await client.get(f"/api/datasets/{dataset.id}/timeseries")
+    assert timeseries_after_overwrite.status_code == 200
+    series_after_overwrite = timeseries_after_overwrite.json()
+    target_values_after_overwrite = series_after_overwrite["columns"][str(target_column.id)]["values"]
+    assert len(series_after_overwrite["timestamps"]) == 6
+    assert target_values_after_overwrite[2] is not None
+    assert target_values_after_overwrite[3] is not None
+
+    undo_response = await client.post(f"/api/datasets/{dataset.id}/undo")
+    assert undo_response.status_code == 200
+    undo_payload = undo_response.json()
+    assert undo_payload["undone_change"]["action_type"] == "data_reconstructed"
+
+    timeseries_after_undo = await client.get(f"/api/datasets/{dataset.id}/timeseries")
+    assert timeseries_after_undo.status_code == 200
+    series_after_undo = timeseries_after_undo.json()
+    target_values_after_undo = series_after_undo["columns"][str(target_column.id)]["values"]
+    assert len(series_after_undo["timestamps"]) == 5
+    assert target_values_after_undo[2] is None
+
+    history_after_undo = await client.get(f"/api/datasets/{dataset.id}/history")
+    assert history_after_undo.status_code == 200
+    assert history_after_undo.json()["total"] == 0
+
+
+async def test_reconstruction_new_column_is_recorded_and_can_be_undone(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, target_column, _ = await _seed_reconstruction_dataset(db_session)
+
+    response = await client.post(
+        f"/api/qc/reconstruct/{dataset.id}",
+        json={
+            "column_id": str(target_column.id),
+            "method": "interpolation",
+            "save_mode": "new_column",
+            "new_column_name": "Speed_80m_reconstructed",
+            "max_gap_hours": 6,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    saved_column_id = payload["saved_column"]["id"]
+
+    history_response = await client.get(f"/api/datasets/{dataset.id}/history")
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total"] == 1
+    assert history_payload["changes"][0]["before_state"]["save_mode"] == "new_column"
+
+    undo_response = await client.post(f"/api/datasets/{dataset.id}/undo")
+    assert undo_response.status_code == 200
+
+    dataset_response = await client.get(f"/api/datasets/{dataset.id}")
+    assert dataset_response.status_code == 200
+    assert all(column["id"] != saved_column_id for column in dataset_response.json()["columns"])
+
+
+async def test_manual_flag_application_is_recorded_and_can_be_undone(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, speed_column, _ = await _seed_dataset(db_session)
+    flag_id = (
+        await client.post(f"/api/qc/flags/{dataset.id}", json={"name": "Manual exclusion", "color": "#ef4444"})
+    ).json()["id"]
+
+    manual_response = await client.post(
+        f"/api/qc/flags/{flag_id}/manual",
+        json={
+            "start_time": "2025-01-01T00:10:00Z",
+            "end_time": "2025-01-01T00:30:00Z",
+            "column_ids": [str(speed_column.id)],
+        },
+    )
+    assert manual_response.status_code == 201
+
+    history_response = await client.get(f"/api/datasets/{dataset.id}/history")
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total"] == 1
+    assert history_payload["changes"][0]["action_type"] == "flag_applied"
+
+    undo_response = await client.post(f"/api/datasets/{dataset.id}/undo")
+    assert undo_response.status_code == 200
+
+    ranges_response = await client.get(f"/api/qc/datasets/{dataset.id}/flagged-ranges")
+    assert ranges_response.status_code == 200
+    assert ranges_response.json() == []
+
+
+async def test_delete_flag_is_recorded_and_can_be_undone(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, speed_column, _ = await _seed_dataset(db_session)
+    flag_id = (
+        await client.post(f"/api/qc/flags/{dataset.id}", json={"name": "Transient", "color": "#6b7280"})
+    ).json()["id"]
+    manual_response = await client.post(
+        f"/api/qc/flags/{flag_id}/manual",
+        json={
+            "start_time": "2025-01-01T00:10:00Z",
+            "end_time": "2025-01-01T00:20:00Z",
+            "column_ids": [str(speed_column.id)],
+        },
+    )
+    assert manual_response.status_code == 201
+
+    clear_history_response = await client.post(f"/api/datasets/{dataset.id}/undo")
+    assert clear_history_response.status_code == 200
+
+    delete_flag_response = await client.delete(f"/api/qc/flags/{flag_id}")
+    assert delete_flag_response.status_code == 204
+
+    history_response = await client.get(f"/api/datasets/{dataset.id}/history")
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total"] == 1
+    assert history_payload["changes"][0]["action_type"] == "flag_removed"
+
+    undo_response = await client.post(f"/api/datasets/{dataset.id}/undo")
+    assert undo_response.status_code == 200
+
+    flags_response = await client.get(f"/api/qc/flags/{dataset.id}")
+    assert flags_response.status_code == 200
+    restored_flags = flags_response.json()
+    assert len(restored_flags) == 1
+    assert restored_flags[0]["name"] == "Transient"

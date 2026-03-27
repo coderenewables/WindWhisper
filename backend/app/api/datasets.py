@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models import DataColumn, Dataset, Project, TimeseriesData
+from app.schemas.history import ChangeLogListResponse, ChangeLogResponse, UndoResponse
 from app.schemas.timeseries import (
     DatasetColumnResponse,
     DatasetDetailResponse,
@@ -21,6 +22,7 @@ from app.schemas.timeseries import (
     TimeSeriesColumnResponse,
     TimeSeriesResponse,
 )
+from app.services.history import get_history, undo_last
 from app.services.qc_engine import get_clean_dataframe
 
 
@@ -58,6 +60,18 @@ def _serialize_dataset(
         created_at=dataset.created_at,
         column_count=column_count,
         row_count=row_count,
+    )
+
+
+def _serialize_change(change: object) -> ChangeLogResponse:
+    return ChangeLogResponse(
+        id=getattr(change, "id"),
+        dataset_id=getattr(change, "dataset_id"),
+        action_type=getattr(change, "action_type"),
+        description=getattr(change, "description"),
+        before_state=getattr(change, "before_state"),
+        after_state=getattr(change, "after_state"),
+        created_at=getattr(change, "created_at"),
     )
 
 
@@ -128,7 +142,12 @@ def _apply_resample(frame: pd.DataFrame, resample_rule: str | None) -> tuple[pd.
 
 
 async def _get_dataset_or_404(db: AsyncSession, dataset_id: uuid.UUID) -> Dataset:
-    statement = select(Dataset).options(selectinload(Dataset.columns)).where(Dataset.id == dataset_id)
+    statement = (
+        select(Dataset)
+        .options(selectinload(Dataset.columns))
+        .where(Dataset.id == dataset_id)
+        .execution_options(populate_existing=True)
+    )
     dataset = (await db.execute(statement)).scalar_one_or_none()
     if dataset is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
@@ -181,6 +200,18 @@ async def get_dataset(dataset_id: uuid.UUID, db: DbSession) -> DatasetDetailResp
 
     summary = _serialize_dataset(dataset, column_count=len(dataset.columns), row_count=row_count or 0)
     return DatasetDetailResponse(**summary.model_dump(), columns=[_serialize_column(column) for column in dataset.columns])
+
+
+@router.get("/datasets/{dataset_id}/history", response_model=ChangeLogListResponse)
+async def get_dataset_history(dataset_id: uuid.UUID, db: DbSession) -> ChangeLogListResponse:
+    changes = await get_history(db, dataset_id)
+    return ChangeLogListResponse(changes=[_serialize_change(change) for change in changes], total=len(changes))
+
+
+@router.post("/datasets/{dataset_id}/undo", response_model=UndoResponse)
+async def undo_dataset_change(dataset_id: uuid.UUID, db: DbSession) -> UndoResponse:
+    change = await undo_last(db, dataset_id)
+    return UndoResponse(undone_change=_serialize_change(change))
 
 
 @router.get("/datasets/{dataset_id}/timeseries", response_model=TimeSeriesResponse)

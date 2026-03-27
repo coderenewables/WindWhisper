@@ -10,6 +10,7 @@ interface UseTimeSeriesOptions {
   fullStart: string | null;
   fullEnd: string | null;
   excludedFlagIds: string[];
+  reloadKey?: number;
 }
 
 interface TimeRange {
@@ -17,7 +18,7 @@ interface TimeRange {
   end: string | null;
 }
 
-export function useTimeSeries({ datasetId, columnIds, resample, fullStart, fullEnd, excludedFlagIds }: UseTimeSeriesOptions) {
+export function useTimeSeries({ datasetId, columnIds, resample, fullStart, fullEnd, excludedFlagIds, reloadKey = 0 }: UseTimeSeriesOptions) {
   const [data, setData] = useState<TimeSeriesResponse | null>(null);
   const [visibleRange, setVisibleRange] = useState<TimeRange>({ start: fullStart, end: fullEnd });
   const [isLoading, setIsLoading] = useState(false);
@@ -67,7 +68,7 @@ export function useTimeSeries({ datasetId, columnIds, resample, fullStart, fullE
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [columnIds, columnKey, datasetId, excludedFlagIds, excludedFlagKey, resample, visibleRange.end, visibleRange.start]);
+  }, [columnIds, columnKey, datasetId, excludedFlagIds, excludedFlagKey, reloadKey, resample, visibleRange.end, visibleRange.start]);
 
   return {
     data,

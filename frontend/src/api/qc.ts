@@ -7,6 +7,8 @@ import type {
   FlagRuleCreatePayload,
   FlagRuleUpdatePayload,
   ManualFlagRequestPayload,
+  ReconstructionRequestPayload,
+  ReconstructionResponse,
   TowerShadowRequestPayload,
   TowerShadowResponse,
 } from "../types/qc";
@@ -65,5 +67,10 @@ export async function deleteFlaggedRange(rangeId: string): Promise<void> {
 
 export async function runTowerShadowDetection(datasetId: string, payload: TowerShadowRequestPayload): Promise<TowerShadowResponse> {
   const response = await apiClient.post<TowerShadowResponse>(`/qc/tower-shadow/${datasetId}`, payload);
+  return response.data;
+}
+
+export async function runGapReconstruction(datasetId: string, payload: ReconstructionRequestPayload): Promise<ReconstructionResponse> {
+  const response = await apiClient.post<ReconstructionResponse>(`/qc/reconstruct/${datasetId}`, payload);
   return response.data;
 }
