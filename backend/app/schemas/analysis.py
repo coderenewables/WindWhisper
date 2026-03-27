@@ -12,6 +12,7 @@ DEFAULT_HISTOGRAM_BIN_COUNT = 30
 DEFAULT_WEIBULL_CURVE_POINTS = 160
 DEFAULT_TURBULENCE_BIN_WIDTH = 1.0
 DEFAULT_EXTREME_WIND_RETURN_PERIODS = [10.0, 20.0, 50.0, 100.0]
+DEFAULT_ENERGY_SPEED_BIN_WIDTH = 1.0
 WeibullMethod = Literal["mle", "moments"]
 ShearMethod = Literal["power", "log"]
 AirDensityPressureSource = Literal["auto", "measured", "estimated"]
@@ -405,3 +406,112 @@ class ExtrapolateResponse(BaseModel):
     timestamps: list[datetime] = Field(default_factory=list)
     values: list[float | None] = Field(default_factory=list)
     created_column: ExtrapolatedColumnResponse | None = None
+
+
+class PowerCurvePointInput(BaseModel):
+    wind_speed_ms: float = Field(ge=0)
+    power_kw: float = Field(ge=0)
+
+
+class PowerCurvePointResponse(BaseModel):
+    wind_speed_ms: float
+    power_kw: float
+
+
+class PowerCurveSummaryResponse(BaseModel):
+    point_count: int = 0
+    rated_power_kw: float = 0.0
+    cut_in_speed_ms: float | None = None
+    rated_speed_ms: float | None = None
+    cut_out_speed_ms: float | None = None
+
+
+class PowerCurveUploadResponse(BaseModel):
+    file_name: str | None = None
+    summary: PowerCurveSummaryResponse
+    points: list[PowerCurvePointResponse] = Field(default_factory=list)
+
+
+class PowerCurveLibraryCreateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    file_name: str | None = Field(default=None, max_length=255)
+    points: Annotated[list[PowerCurvePointInput], Field(min_length=2)]
+
+
+class PowerCurveLibraryUpdateRequest(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=255)
+    file_name: str | None = Field(default=None, max_length=255)
+    points: list[PowerCurvePointInput] | None = Field(default=None, min_length=2)
+
+
+class PowerCurveLibraryResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    file_name: str | None = None
+    summary: PowerCurveSummaryResponse
+    points: list[PowerCurvePointResponse] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class PowerCurveLibraryListResponse(BaseModel):
+    items: list[PowerCurveLibraryResponse] = Field(default_factory=list)
+    total: int = 0
+
+
+class EnergyEstimateRequest(BaseModel):
+    speed_column_id: uuid.UUID
+    power_curve_points: Annotated[list[PowerCurvePointInput], Field(min_length=2)]
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    air_density_adjustment: bool = False
+    temperature_column_id: uuid.UUID | None = None
+    pressure_column_id: uuid.UUID | None = None
+    pressure_source: AirDensityPressureSource = "auto"
+    elevation_m: float | None = None
+    density_reference_kg_per_m3: float = Field(default=1.225, gt=0)
+    speed_bin_width: float = Field(default=DEFAULT_ENERGY_SPEED_BIN_WIDTH, gt=0, le=10)
+
+
+class EnergyEstimateMonthlyResponse(BaseModel):
+    month: int
+    label: str
+    energy_mwh: float = 0.0
+    mean_power_kw: float | None = None
+    sample_count: int = 0
+
+
+class EnergyEstimateSpeedBinResponse(BaseModel):
+    lower: float
+    upper: float
+    center: float
+    sample_count: int = 0
+    mean_power_kw: float | None = None
+    energy_mwh: float = 0.0
+
+
+class EnergyEstimateSummaryResponse(BaseModel):
+    rated_power_kw: float = 0.0
+    mean_power_kw: float = 0.0
+    annual_energy_mwh: float = 0.0
+    capacity_factor_pct: float = 0.0
+    equivalent_full_load_hours: float = 0.0
+    time_step_hours: float | None = None
+    sample_count: int = 0
+    air_density_adjusted: bool = False
+    pressure_source: AirDensityPressureSource | None = None
+    elevation_m: float | None = None
+    estimated_pressure_hpa: float | None = None
+
+
+class EnergyEstimateResponse(BaseModel):
+    dataset_id: uuid.UUID
+    speed_column_id: uuid.UUID
+    temperature_column_id: uuid.UUID | None = None
+    pressure_column_id: uuid.UUID | None = None
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    air_density_adjustment: bool = False
+    power_curve: list[PowerCurvePointResponse] = Field(default_factory=list)
+    power_curve_summary: PowerCurveSummaryResponse
+    summary: EnergyEstimateSummaryResponse
+    monthly: list[EnergyEstimateMonthlyResponse] = Field(default_factory=list)
+    speed_bins: list[EnergyEstimateSpeedBinResponse] = Field(default_factory=list)

@@ -11,7 +11,8 @@ from app.api.mcp import router as mcp_router
 from app.api.projects import router as projects_router
 from app.api.qc import router as qc_router
 from app.config import settings
-from app.database import close_database_connections, ping_database
+from app.database import SessionLocal, close_database_connections, ping_database
+from app.services.energy_estimate import ensure_seeded_default_power_curve
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +23,9 @@ async def lifespan(_: FastAPI):
     database_available = await ping_database()
     if not database_available:
         logger.warning("Database connectivity check failed during startup.")
+    else:
+        async with SessionLocal() as session:
+            await ensure_seeded_default_power_curve(session)
     try:
         yield
     finally:

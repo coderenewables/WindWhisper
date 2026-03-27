@@ -338,6 +338,110 @@ export interface ExtremeWindSummary {
   warning_message: string | null;
 }
 
+export interface PowerCurvePoint {
+  wind_speed_ms: number;
+  power_kw: number;
+}
+
+export interface PowerCurveSummary {
+  point_count: number;
+  rated_power_kw: number;
+  cut_in_speed_ms: number | null;
+  rated_speed_ms: number | null;
+  cut_out_speed_ms: number | null;
+}
+
+export interface PowerCurveUploadResponse {
+  file_name: string | null;
+  summary: PowerCurveSummary;
+  points: PowerCurvePoint[];
+}
+
+export interface PowerCurveLibraryItem {
+  id: string;
+  name: string;
+  file_name: string | null;
+  summary: PowerCurveSummary;
+  points: PowerCurvePoint[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PowerCurveLibraryListResponse {
+  items: PowerCurveLibraryItem[];
+  total: number;
+}
+
+export interface PowerCurveLibraryCreateRequest {
+  name: string;
+  file_name?: string | null;
+  points: PowerCurvePoint[];
+}
+
+export interface PowerCurveLibraryUpdateRequest {
+  name?: string;
+  file_name?: string | null;
+  points?: PowerCurvePoint[];
+}
+
+export interface EnergyEstimateRequest {
+  speed_column_id: string;
+  power_curve_points: PowerCurvePoint[];
+  exclude_flags?: string[];
+  air_density_adjustment?: boolean;
+  temperature_column_id?: string;
+  pressure_column_id?: string;
+  pressure_source?: AirDensityPressureSource;
+  elevation_m?: number;
+  density_reference_kg_per_m3?: number;
+  speed_bin_width?: number;
+}
+
+export interface EnergyEstimateMonthly {
+  month: number;
+  label: string;
+  energy_mwh: number;
+  mean_power_kw: number | null;
+  sample_count: number;
+}
+
+export interface EnergyEstimateSpeedBin {
+  lower: number;
+  upper: number;
+  center: number;
+  sample_count: number;
+  mean_power_kw: number | null;
+  energy_mwh: number;
+}
+
+export interface EnergyEstimateSummary {
+  rated_power_kw: number;
+  mean_power_kw: number;
+  annual_energy_mwh: number;
+  capacity_factor_pct: number;
+  equivalent_full_load_hours: number;
+  time_step_hours: number | null;
+  sample_count: number;
+  air_density_adjusted: boolean;
+  pressure_source: AirDensityPressureSource | null;
+  elevation_m: number | null;
+  estimated_pressure_hpa: number | null;
+}
+
+export interface EnergyEstimateResponse {
+  dataset_id: string;
+  speed_column_id: string;
+  temperature_column_id: string | null;
+  pressure_column_id: string | null;
+  excluded_flag_ids: string[];
+  air_density_adjustment: boolean;
+  power_curve: PowerCurvePoint[];
+  power_curve_summary: PowerCurveSummary;
+  summary: EnergyEstimateSummary;
+  monthly: EnergyEstimateMonthly[];
+  speed_bins: EnergyEstimateSpeedBin[];
+}
+
 export type MCPMethod = "linear" | "variance_ratio" | "matrix";
 export type MCPReferenceDataSource = "era5" | "merra2";
 

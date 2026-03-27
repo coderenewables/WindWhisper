@@ -2,6 +2,8 @@ import { apiClient } from "./client";
 import type {
   AirDensityRequest,
   AirDensityResponse,
+  EnergyEstimateRequest,
+  EnergyEstimateResponse,
   ExtremeWindRequest,
   ExtremeWindResponse,
   ExtrapolateRequest,
@@ -17,6 +19,11 @@ import type {
   MCPReferenceDownloadStatusResponse,
   MCPPredictionRequest,
   MCPPredictionResponse,
+  PowerCurveLibraryCreateRequest,
+  PowerCurveLibraryItem,
+  PowerCurveLibraryListResponse,
+  PowerCurveLibraryUpdateRequest,
+  PowerCurveUploadResponse,
   ShearRequest,
   ShearResponse,
   TurbulenceRequest,
@@ -59,6 +66,39 @@ export async function getAirDensityAnalysis(datasetId: string, payload: AirDensi
 
 export async function getExtremeWindAnalysis(datasetId: string, payload: ExtremeWindRequest): Promise<ExtremeWindResponse> {
   const response = await apiClient.post<ExtremeWindResponse>(`/analysis/extreme-wind/${datasetId}`, payload);
+  return response.data;
+}
+
+export async function uploadPowerCurve(file: File): Promise<PowerCurveUploadResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const response = await apiClient.post<PowerCurveUploadResponse>("/analysis/power-curve/upload", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return response.data;
+}
+
+export async function listPowerCurves(): Promise<PowerCurveLibraryListResponse> {
+  const response = await apiClient.get<PowerCurveLibraryListResponse>("/analysis/power-curves");
+  return response.data;
+}
+
+export async function createPowerCurve(payload: PowerCurveLibraryCreateRequest): Promise<PowerCurveLibraryItem> {
+  const response = await apiClient.post<PowerCurveLibraryItem>("/analysis/power-curves", payload);
+  return response.data;
+}
+
+export async function updatePowerCurve(curveId: string, payload: PowerCurveLibraryUpdateRequest): Promise<PowerCurveLibraryItem> {
+  const response = await apiClient.put<PowerCurveLibraryItem>(`/analysis/power-curves/${curveId}`, payload);
+  return response.data;
+}
+
+export async function deletePowerCurve(curveId: string): Promise<void> {
+  await apiClient.delete(`/analysis/power-curves/${curveId}`);
+}
+
+export async function getEnergyEstimate(datasetId: string, payload: EnergyEstimateRequest): Promise<EnergyEstimateResponse> {
+  const response = await apiClient.post<EnergyEstimateResponse>(`/analysis/energy-estimate/${datasetId}`, payload);
   return response.data;
 }
 

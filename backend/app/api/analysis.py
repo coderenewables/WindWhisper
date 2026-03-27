@@ -3,21 +3,27 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import datetime
+from io import StringIO
 
 import numpy as np
 import pandas as pd
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.models import DataColumn, Project, TimeseriesData
+from app.models import DataColumn, PowerCurve, Project, TimeseriesData
 from app.schemas.analysis import (
     AirDensityMonthlyResponse,
     AirDensityPointResponse,
     AirDensityRequest,
     AirDensityResponse,
     AirDensitySummaryResponse,
+    EnergyEstimateMonthlyResponse,
+    EnergyEstimateRequest,
+    EnergyEstimateResponse,
+    EnergyEstimateSpeedBinResponse,
+    EnergyEstimateSummaryResponse,
     ExtremeWindAnnualMaximumResponse,
     ExtremeWindGumbelFitResponse,
     ExtremeWindObservedPointResponse,
@@ -33,6 +39,13 @@ from app.schemas.analysis import (
     HistogramRequest,
     HistogramResponse,
     HistogramStatsResponse,
+    PowerCurveLibraryCreateRequest,
+    PowerCurveLibraryListResponse,
+    PowerCurveLibraryResponse,
+    PowerCurveLibraryUpdateRequest,
+    PowerCurvePointResponse,
+    PowerCurveSummaryResponse,
+    PowerCurveUploadResponse,
     ShearDirectionBinResponse,
     ShearPairResponse,
     ShearProfilePointResponse,
@@ -57,6 +70,7 @@ from app.schemas.analysis import (
     WindRoseSpeedBinResponse,
 )
 from app.services.air_density import air_density_summary, build_density_points, calculate_air_density, estimate_pressure_from_elevation, monthly_averages, wind_power_density
+from app.services.energy_estimate import ensure_seeded_default_power_curve, energy_by_month, energy_by_speed_bin, gross_energy_estimate, load_power_curve, parse_power_curve_csv, summarize_power_curve
 from app.services.extreme_wind import extreme_wind_summary
 from app.services.qc_engine import filter_flagged_data, get_clean_dataframe, get_dataset_or_404, load_dataset_frame
 from app.services.turbulence import build_scatter_points, calculate_ti, iec_reference_curves, ti_by_direction, ti_by_speed_bin, ti_summary
@@ -243,6 +257,33 @@ async def _resolve_project_elevation(db: AsyncSession, project_id: uuid.UUID) ->
     result = await db.execute(select(Project.elevation).where(Project.id == project_id))
     value = result.scalar_one_or_none()
     return float(value) if value is not None else None
+
+
+def _serialize_power_curve(curve: pd.DataFrame) -> list[PowerCurvePointResponse]:
+    return [
+        PowerCurvePointResponse(wind_speed_ms=float(row.wind_speed_ms), power_kw=float(row.power_kw))
+        for row in curve.itertuples(index=False)
+    ]
+
+
+def _serialize_power_curve_record(record: PowerCurve) -> PowerCurveLibraryResponse:
+    points = load_power_curve(record.points_json or [])
+    return PowerCurveLibraryResponse(
+        id=record.id,
+        name=record.name,
+        file_name=record.file_name,
+        summary=PowerCurveSummaryResponse(**(record.summary_json or summarize_power_curve(points))),
+        points=_serialize_power_curve(points),
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+async def _get_power_curve_or_404(db: AsyncSession, curve_id: uuid.UUID) -> PowerCurve:
+    record = await db.get(PowerCurve, curve_id)
+    if record is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Power curve not found")
+    return record
 
 
 @router.post("/wind-rose/{dataset_id}", response_model=WindRoseResponse)
@@ -776,4 +817,218 @@ async def create_extrapolated_series(
         timestamps=timestamps,
         values=[None if not np.isfinite(value) else float(value) for value in values],
         created_column=created_column,
+    )
+
+
+@router.post("/power-curve/upload", response_model=PowerCurveUploadResponse)
+async def upload_power_curve(file: UploadFile = File(...)) -> PowerCurveUploadResponse:
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A power curve file is required")
+
+    try:
+        contents = (await file.read()).decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Power curve file must be UTF-8 encoded text") from exc
+
+    try:
+        curve = parse_power_curve_csv(contents)
+    except (ValueError, pd.errors.ParserError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    return PowerCurveUploadResponse(
+        file_name=file.filename,
+        summary=PowerCurveSummaryResponse(**summarize_power_curve(curve)),
+        points=_serialize_power_curve(curve),
+    )
+
+
+@router.get("/power-curves", response_model=PowerCurveLibraryListResponse)
+async def list_power_curves(db: AsyncSession = Depends(get_db)) -> PowerCurveLibraryListResponse:
+    await ensure_seeded_default_power_curve(db)
+    records = (await db.execute(select(PowerCurve).order_by(PowerCurve.updated_at.desc(), PowerCurve.created_at.desc(), PowerCurve.name.asc()))).scalars().all()
+    items = [_serialize_power_curve_record(record) for record in records]
+    return PowerCurveLibraryListResponse(items=items, total=len(items))
+
+
+@router.post("/power-curves", response_model=PowerCurveLibraryResponse, status_code=status.HTTP_201_CREATED)
+async def create_power_curve_library_item(
+    payload: PowerCurveLibraryCreateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PowerCurveLibraryResponse:
+    try:
+        curve = load_power_curve({"points": [point.model_dump() for point in payload.points]})
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    existing = (await db.execute(select(PowerCurve).where(PowerCurve.name == payload.name))).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A saved power curve with this name already exists")
+
+    record = PowerCurve(
+        name=payload.name,
+        file_name=payload.file_name,
+        summary_json=summarize_power_curve(curve),
+        points_json=[point.model_dump() for point in _serialize_power_curve(curve)],
+    )
+    db.add(record)
+    await db.commit()
+    await db.refresh(record)
+    return _serialize_power_curve_record(record)
+
+
+@router.put("/power-curves/{curve_id}", response_model=PowerCurveLibraryResponse)
+async def update_power_curve_library_item(
+    curve_id: uuid.UUID,
+    payload: PowerCurveLibraryUpdateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> PowerCurveLibraryResponse:
+    record = await _get_power_curve_or_404(db, curve_id)
+
+    if payload.name is not None and payload.name != record.name:
+        existing = (await db.execute(select(PowerCurve).where(PowerCurve.name == payload.name, PowerCurve.id != curve_id))).scalar_one_or_none()
+        if existing is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="A saved power curve with this name already exists")
+        record.name = payload.name
+
+    if payload.file_name is not None:
+        record.file_name = payload.file_name
+
+    if payload.points is not None:
+        try:
+            curve = load_power_curve({"points": [point.model_dump() for point in payload.points]})
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        record.summary_json = summarize_power_curve(curve)
+        record.points_json = [point.model_dump() for point in _serialize_power_curve(curve)]
+
+    await db.commit()
+    await db.refresh(record)
+    return _serialize_power_curve_record(record)
+
+
+@router.delete("/power-curves/{curve_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_power_curve_library_item(
+    curve_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    record = await _get_power_curve_or_404(db, curve_id)
+    await db.delete(record)
+    await db.commit()
+
+
+@router.post("/energy-estimate/{dataset_id}", response_model=EnergyEstimateResponse)
+async def create_energy_estimate(
+    dataset_id: uuid.UUID,
+    payload: EnergyEstimateRequest,
+    db: AsyncSession = Depends(get_db),
+) -> EnergyEstimateResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    speed_column = _resolve_column(dataset.columns, payload.speed_column_id, "speed_column_id")
+    temperature_column = _resolve_column(dataset.columns, payload.temperature_column_id, "temperature_column_id") if payload.temperature_column_id is not None else None
+    pressure_column = _resolve_column(dataset.columns, payload.pressure_column_id, "pressure_column_id") if payload.pressure_column_id is not None else None
+
+    if speed_column.measurement_type != "speed":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="speed_column_id must reference a wind speed column")
+    if temperature_column is not None and temperature_column.measurement_type != "temperature":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="temperature_column_id must reference a temperature column")
+    if pressure_column is not None and pressure_column.measurement_type != "pressure":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pressure_column_id must reference a pressure column")
+
+    try:
+        power_curve = load_power_curve({"points": [point.model_dump() for point in payload.power_curve_points]})
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    project_elevation = await _resolve_project_elevation(db, dataset.project_id)
+    selected_elevation = payload.elevation_m if payload.elevation_m is not None else project_elevation
+    estimated_pressure_hpa = None
+    density_values = None
+    pressure_source = None
+
+    column_ids = [speed_column.id]
+    if payload.air_density_adjustment:
+        if temperature_column is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="temperature_column_id is required when air_density_adjustment is enabled")
+        column_ids.append(temperature_column.id)
+
+        if payload.pressure_source == "measured" and pressure_column is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="pressure_column_id is required when pressure_source is measured")
+        if payload.pressure_source == "estimated" and selected_elevation is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="elevation_m or project elevation is required when pressure_source is estimated")
+        if payload.pressure_source == "auto" and pressure_column is None and selected_elevation is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide a pressure column or elevation to enable air density adjustment")
+        if pressure_column is not None:
+            column_ids.append(pressure_column.id)
+
+    frame = await get_clean_dataframe(db, dataset.id, column_ids=column_ids, exclude_flag_ids=payload.exclude_flags)
+    if frame.empty:
+        power_curve_summary = PowerCurveSummaryResponse(**summarize_power_curve(power_curve))
+        return EnergyEstimateResponse(
+            dataset_id=dataset.id,
+            speed_column_id=speed_column.id,
+            temperature_column_id=temperature_column.id if temperature_column is not None else None,
+            pressure_column_id=pressure_column.id if pressure_column is not None else None,
+            excluded_flag_ids=payload.exclude_flags,
+            air_density_adjustment=payload.air_density_adjustment,
+            power_curve=_serialize_power_curve(power_curve),
+            power_curve_summary=power_curve_summary,
+            summary=EnergyEstimateSummaryResponse(
+                rated_power_kw=power_curve_summary.rated_power_kw,
+                air_density_adjusted=False,
+                pressure_source=payload.pressure_source if payload.air_density_adjustment else None,
+                elevation_m=selected_elevation,
+            ),
+        )
+
+    timestamps = pd.DatetimeIndex(frame.index)
+    speed_values = _coerce_numeric_array(frame, speed_column.name)
+
+    if payload.air_density_adjustment:
+        temperature_values = _coerce_numeric_array(frame, temperature_column.name if temperature_column is not None else "")
+        use_estimated_pressure = payload.pressure_source == "estimated" or (payload.pressure_source == "auto" and pressure_column is None)
+        if use_estimated_pressure:
+            estimated_pressure_hpa = estimate_pressure_from_elevation(selected_elevation) if selected_elevation is not None else None
+            pressure_values = np.full(speed_values.shape, estimated_pressure_hpa if estimated_pressure_hpa is not None else np.nan, dtype=float)
+            pressure_source = "estimated"
+        else:
+            pressure_values = _coerce_numeric_array(frame, pressure_column.name if pressure_column is not None else "")
+            pressure_source = "measured"
+        density_values = calculate_air_density(temperature_values, pressure_values)
+
+    try:
+        estimate = gross_energy_estimate(
+            speed_values,
+            power_curve,
+            density=density_values,
+            air_density_adjustment=payload.air_density_adjustment,
+            timestamps=timestamps,
+            density_reference=payload.density_reference_kg_per_m3,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    power_values = np.asarray(estimate["power_kw"], dtype=float)
+    time_step_hours = float(estimate["time_step_hours"])
+    monthly_rows = energy_by_month(timestamps, power_values, time_step_hours=time_step_hours)
+    speed_bin_rows = energy_by_speed_bin(speed_values, power_values, time_step_hours=time_step_hours, bin_width=payload.speed_bin_width)
+    power_curve_summary = PowerCurveSummaryResponse(**summarize_power_curve(power_curve))
+
+    return EnergyEstimateResponse(
+        dataset_id=dataset.id,
+        speed_column_id=speed_column.id,
+        temperature_column_id=temperature_column.id if temperature_column is not None else None,
+        pressure_column_id=pressure_column.id if pressure_column is not None else None,
+        excluded_flag_ids=payload.exclude_flags,
+        air_density_adjustment=payload.air_density_adjustment,
+        power_curve=_serialize_power_curve(power_curve),
+        power_curve_summary=power_curve_summary,
+        summary=EnergyEstimateSummaryResponse(
+            time_step_hours=time_step_hours,
+            pressure_source=pressure_source,
+            elevation_m=selected_elevation,
+            estimated_pressure_hpa=estimated_pressure_hpa,
+            **estimate["summary"],
+        ),
+        monthly=[EnergyEstimateMonthlyResponse(**row) for row in monthly_rows],
+        speed_bins=[EnergyEstimateSpeedBinResponse(**row) for row in speed_bin_rows],
     )

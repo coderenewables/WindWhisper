@@ -4,6 +4,7 @@ from app.models.analysis_result import AnalysisResult
 from app.models.change_log import ChangeLog
 from app.models.dataset import DataColumn, Dataset
 from app.models.flag import Flag, FlagRule, FlaggedRange
+from app.models.power_curve import PowerCurve
 from app.models.project import Project
 from app.models.timeseries import TimeseriesData
 
@@ -15,6 +16,7 @@ __all__ = [
 	"Flag",
 	"FlagRule",
 	"FlaggedRange",
+	"PowerCurve",
 	"Project",
 	"TimeseriesData",
 ]

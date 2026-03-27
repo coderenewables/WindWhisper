@@ -28,6 +28,11 @@ const MCPPage = lazy(async () => {
   return { default: module.MCPPage };
 });
 
+const EnergyPage = lazy(async () => {
+  const module = await import("./pages/EnergyPage");
+  return { default: module.EnergyPage };
+});
+
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
     <section className="panel-surface flex min-h-[320px] flex-col justify-between p-8">
@@ -83,15 +88,7 @@ export default function App() {
         <Route path="qc" element={<Suspense fallback={<RouteFallback />}><QCPage /></Suspense>} />
         <Route path="analysis" element={<Suspense fallback={<RouteFallback />}><AnalysisPage /></Suspense>} />
         <Route path="mcp" element={<Suspense fallback={<RouteFallback />}><MCPPage /></Suspense>} />
-        <Route
-          path="energy"
-          element={
-            <PlaceholderPage
-              title="Energy Workspace"
-              description="Power-curve editing and annual energy estimate tooling will be introduced here."
-            />
-          }
-        />
+        <Route path="energy" element={<Suspense fallback={<RouteFallback />}><EnergyPage /></Suspense>} />
         <Route
           path="export"
           element={

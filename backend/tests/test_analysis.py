@@ -542,3 +542,220 @@ async def test_extreme_wind_endpoint_returns_return_periods_and_gust_factor(clie
     assert len(payload["return_periods"]) == 4
     assert len(payload["return_period_curve"]) >= 24
     assert len(payload["observed_points"]) == 5
+
+
+async def test_power_curve_upload_endpoint_parses_csv(client: AsyncClient) -> None:
+    csv_content = "wind_speed_ms,power_kw\n0,0\n4,120\n8,1350\n12,3000\n25,0\n"
+
+    response = await client.post(
+        "/api/analysis/power-curve/upload",
+        files={"file": ("sample_power_curve.csv", csv_content, "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["file_name"] == "sample_power_curve.csv"
+    assert payload["summary"]["point_count"] == 5
+    assert payload["summary"]["rated_power_kw"] == 3000.0
+    assert payload["summary"]["cut_in_speed_ms"] == 4.0
+    assert payload["points"][2]["wind_speed_ms"] == 8.0
+
+
+async def test_power_curve_library_crud_persists_curves_for_reuse(client: AsyncClient) -> None:
+    create_response = await client.post(
+        "/api/analysis/power-curves",
+        json={
+            "name": "Generic 3 MW",
+            "file_name": "generic_3mw.csv",
+            "points": [
+                {"wind_speed_ms": 0, "power_kw": 0},
+                {"wind_speed_ms": 5, "power_kw": 250},
+                {"wind_speed_ms": 10, "power_kw": 1500},
+                {"wind_speed_ms": 12, "power_kw": 3000},
+                {"wind_speed_ms": 25, "power_kw": 0},
+            ],
+        },
+    )
+
+    assert create_response.status_code == 201
+    created = create_response.json()
+    assert created["name"] == "Generic 3 MW"
+    assert created["summary"]["rated_power_kw"] == 3000.0
+    curve_id = created["id"]
+
+    list_response = await client.get("/api/analysis/power-curves")
+    assert list_response.status_code == 200
+    listed = list_response.json()
+    assert listed["total"] == 2
+    assert any(item["id"] == curve_id for item in listed["items"])
+
+    update_response = await client.put(
+        f"/api/analysis/power-curves/{curve_id}",
+        json={
+            "name": "Generic 3 MW Updated",
+            "points": [
+                {"wind_speed_ms": 0, "power_kw": 0},
+                {"wind_speed_ms": 4, "power_kw": 100},
+                {"wind_speed_ms": 8, "power_kw": 1300},
+                {"wind_speed_ms": 12, "power_kw": 3000},
+                {"wind_speed_ms": 25, "power_kw": 0},
+            ],
+        },
+    )
+
+    assert update_response.status_code == 200
+    updated = update_response.json()
+    assert updated["name"] == "Generic 3 MW Updated"
+    assert updated["summary"]["cut_in_speed_ms"] == 4.0
+
+    delete_response = await client.delete(f"/api/analysis/power-curves/{curve_id}")
+    assert delete_response.status_code == 204
+
+    final_list_response = await client.get("/api/analysis/power-curves")
+    assert final_list_response.status_code == 200
+    final_payload = final_list_response.json()
+    assert final_payload["total"] == 1
+    assert final_payload["items"][0]["file_name"] == "sample_power_curve.csv"
+    assert final_payload["items"][0]["summary"]["rated_power_kw"] == 3000.0
+
+
+async def test_power_curve_library_list_seeds_sample_curve_when_empty(client: AsyncClient) -> None:
+    response = await client.get("/api/analysis/power-curves")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 1
+    assert payload["items"][0]["name"] == "Sample 3 MW Turbine"
+    assert payload["items"][0]["file_name"] == "sample_power_curve.csv"
+    assert payload["items"][0]["summary"]["rated_power_kw"] == 3000.0
+
+
+async def test_energy_estimate_endpoint_returns_annualized_summary_and_breakdowns(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="Energy Site", elevation=120)
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 1, 31, 22, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Energy Mast",
+        source_type="mast",
+        time_step_seconds=3600,
+        start_time=start_time,
+        end_time=start_time + timedelta(hours=3),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_100m", measurement_type="speed", height_m=100)
+    db_session.add(speed_column)
+    await db_session.flush()
+
+    speeds = [5.0, 10.0, 12.0, 10.0]
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(hours=index),
+                values_json={"Speed_100m": speeds[index]},
+            )
+            for index in range(len(speeds))
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/energy-estimate/{dataset.id}",
+        json={
+            "speed_column_id": str(speed_column.id),
+            "power_curve_points": [
+                {"wind_speed_ms": 0, "power_kw": 0},
+                {"wind_speed_ms": 5, "power_kw": 250},
+                {"wind_speed_ms": 10, "power_kw": 1500},
+                {"wind_speed_ms": 12, "power_kw": 3000},
+                {"wind_speed_ms": 20, "power_kw": 3000},
+                {"wind_speed_ms": 25, "power_kw": 0},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["speed_column_id"] == str(speed_column.id)
+    assert payload["summary"]["time_step_hours"] == 1.0
+    assert payload["summary"]["rated_power_kw"] == 3000.0
+    assert payload["summary"]["mean_power_kw"] == 1562.5
+    assert payload["summary"]["capacity_factor_pct"] == 52.083333333333336
+    assert payload["summary"]["annual_energy_mwh"] == 13687.5
+    assert payload["summary"]["equivalent_full_load_hours"] == 4562.5
+    assert payload["summary"]["air_density_adjusted"] is False
+    assert len(payload["monthly"]) == 2
+    assert payload["monthly"][0]["label"] == "Jan"
+    assert len(payload["speed_bins"]) >= 7
+
+
+async def test_energy_estimate_endpoint_applies_air_density_adjustment(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="Dense Site", elevation=30)
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 3, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Dense Mast",
+        source_type="mast",
+        time_step_seconds=3600,
+        start_time=start_time,
+        end_time=start_time + timedelta(hours=2),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_90m", measurement_type="speed", height_m=90)
+    temperature_column = DataColumn(dataset_id=dataset.id, name="Temp_2m", measurement_type="temperature", height_m=2)
+    pressure_column = DataColumn(dataset_id=dataset.id, name="Press_hPa", measurement_type="pressure", height_m=2)
+    db_session.add_all([speed_column, temperature_column, pressure_column])
+    await db_session.flush()
+
+    rows = [
+        {"Speed_90m": 10.0, "Temp_2m": 5.0, "Press_hPa": 1030.0},
+        {"Speed_90m": 11.0, "Temp_2m": 4.0, "Press_hPa": 1031.0},
+        {"Speed_90m": 12.0, "Temp_2m": 4.0, "Press_hPa": 1032.0},
+    ]
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(hours=index),
+                values_json=row,
+            )
+            for index, row in enumerate(rows)
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/energy-estimate/{dataset.id}",
+        json={
+            "speed_column_id": str(speed_column.id),
+            "temperature_column_id": str(temperature_column.id),
+            "pressure_column_id": str(pressure_column.id),
+            "air_density_adjustment": True,
+            "pressure_source": "measured",
+            "power_curve_points": [
+                {"wind_speed_ms": 0, "power_kw": 0},
+                {"wind_speed_ms": 5, "power_kw": 300},
+                {"wind_speed_ms": 10, "power_kw": 1500},
+                {"wind_speed_ms": 12, "power_kw": 3000},
+                {"wind_speed_ms": 20, "power_kw": 3000},
+                {"wind_speed_ms": 25, "power_kw": 0},
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["air_density_adjusted"] is True
+    assert payload["summary"]["pressure_source"] == "measured"
+    assert payload["summary"]["annual_energy_mwh"] > 0
+    assert payload["summary"]["mean_power_kw"] > 0
