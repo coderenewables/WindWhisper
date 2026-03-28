@@ -20,7 +20,7 @@ export function TopBar({ darkMode, onToggleDarkMode }: TopBarProps) {
   return (
     <header className="panel-surface sticky top-4 z-10 mb-6 flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-6">
       <div>
-        <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-ember-500">WindWhisper</p>
+        <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-ember-500">GoKaatru</p>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-500">
           <Link to="/" className="font-medium text-ink-700 transition hover:text-ink-900">
             Dashboard

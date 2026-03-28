@@ -89,7 +89,7 @@ export function DashboardPage() {
               Organize measurement campaigns before import, QC, and energy analysis.
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
-              WindWhisper starts with project workspaces. Each project will anchor raw logger imports, derived data sets,
+              GoKaatru starts with project workspaces. Each project will anchor raw logger imports, derived data sets,
               flagging rules, and downstream resource analysis.
             </p>
           </div>

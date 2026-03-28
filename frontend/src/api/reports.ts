@@ -6,11 +6,11 @@ import type { ReportDownload, ReportGenerateRequest } from "../types/report";
 function parseFileName(response: AxiosResponse<Blob>) {
   const header = response.headers["content-disposition"];
   if (!header) {
-    return "windwhisper-report.dat";
+    return "gokaatru-report.dat";
   }
 
   const match = /filename="?([^";]+)"?/i.exec(header);
-  return match?.[1] ?? "windwhisper-report.dat";
+  return match?.[1] ?? "gokaatru-report.dat";
 }
 
 

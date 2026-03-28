@@ -1,83 +1,253 @@
-# WindWhisper 🌬️
+# GoKaatru 🌬️
 
-WindWhisper is aiming to be a comprehensive, open-source web application for wind resource assessment, built to cover the full Wind Resource Assessment (WRA) workflow with transparency and reproducibility. It includes importing raw data, performing Quality Control (QC), analyzing metrics (shear, turbulence, Weibull), adjusting long-term measurements, and visualizing the data.
-
-## Project Architecture
-
-The application is a full-stack web app:
-- **Frontend:** React 18, Vite, TypeScript, and TailwindCSS rendering interactive visualizations (Recharts, Plotly.js).
-- **Backend:** FastAPI (Python 3.11+) powering heavy computation (MCP, shear extrapolation, data reconstruction).
-- **Database:** PostgreSQL storing projects, datasets, metadata, and TimeSeries data.
+**GoKaatru** is a comprehensive, open-source web application for **Wind Resource Assessment (WRA)**. It covers the full workflow — from importing raw met-tower data through quality control, advanced analysis (shear, turbulence, Weibull, extreme wind), long-term correction (MCP), energy estimation, and professional report generation — all with transparency and reproducibility.
 
 ---
 
-## Getting Started
+## Features
+
+| Category | Capabilities |
+|---|---|
+| **Data Import** | CSV, NRG Systems, Campbell Scientific (TOA5), Excel; auto-delimiter detection; column-type auto-detection |
+| **Quality Control** | Range / spike / flat-line rules; manual & automatic flagging; tower-shadow correction; undo/redo history |
+| **Analysis** | Wind rose, frequency histogram, Weibull fit (MLE & moments), wind shear (power & log law), turbulence intensity (IEC classification), air density, extreme wind (Gumbel), wind profiles |
+| **MCP** | Linear regression, variance ratio, matrix method; correlate / predict / compare |
+| **Energy** | Power-curve library, gross AEP, density-adjusted AEP, monthly & speed-bin breakdowns |
+| **Data Reconstruction** | Linear interpolation, KNN imputation, correlation-based fill |
+| **Export** | CSV, WAsP TAB, IEA JSON, OpenWind CSV, KML site map |
+| **Reports** | PDF & DOCX generation with selectable sections |
+| **Workflows** | Save and replay multi-step processing pipelines |
+| **Notifications** | Real-time toast notifications for long-running tasks |
+| **Maps** | Interactive Leaflet map for project sites |
+
+---
+
+## Architecture
+
+```
+┌──────────────────────────────────────────────────────────┐
+│                    nginx  (:3000)                         │
+│   /api/*  ──►  FastAPI backend  (:8000)                  │
+│   /*      ──►  React SPA        (:80)                    │
+└──────────────────────────────────────────────────────────┘
+         │                           │
+    PostgreSQL (:5432)          Redis (:6379)
+```
+
+- **Frontend** — React 18 · Vite · TypeScript · TailwindCSS · Plotly.js · Leaflet
+- **Backend** — FastAPI · Python 3.11+ · SQLAlchemy (async) · Pandas · SciPy · scikit-learn
+- **Database** — PostgreSQL 15
+- **Cache / Queue** — Redis 7
+
+---
+
+## Quick Start (Docker)
+
+The fastest way to run GoKaatru — no language runtimes needed, just Docker.
+
+```bash
+git clone https://github.com/coderenewables/GoKaatru.git
+cd GoKaatru
+docker compose up --build -d
+```
+
+Once all containers are healthy the application is available at:
+
+| URL | Description |
+|---|---|
+| **http://localhost:3000** | Application (nginx proxy) |
+| **http://localhost:3000/api/health** | API health check |
+| **http://localhost:3000/docs** | Swagger / OpenAPI explorer |
+
+To stop:
+
+```bash
+docker compose down
+```
+
+To also remove persisted data volumes:
+
+```bash
+docker compose down -v
+```
+
+---
+
+## Development Setup
+
+For day-to-day development you can run each service directly on your machine.
 
 ### Prerequisites
 
-Before you begin, ensure you have the following installed on your machine:
-- [Node.js](https://nodejs.org/en) (v18 or higher recommended)
-- [Miniconda / Anaconda](https://docs.conda.io/en/latest/miniconda.html) for Python environment management
-- [Docker Desktop](https://www.docker.com/products/docker-desktop) (to easily spin up PostgreSQL)
-- Git
+- [Git](https://git-scm.com/)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop) (for PostgreSQL)
+- [Node.js](https://nodejs.org/) v18+
+- [Miniconda / Anaconda](https://docs.conda.io/en/latest/miniconda.html)
 
-### 1. Clone the repository
+### 1. Clone & Start the Database
 
 ```bash
-git clone https://github.com/coderenewables/WindWhisper.git
-cd WindWhisper
+git clone https://github.com/coderenewables/GoKaatru.git
+cd GoKaatru
+
+# Start only PostgreSQL (and optionally Redis)
+docker compose up postgres redis -d
 ```
 
-### 2. Set up the Database
-
-We use Docker to quickly run local PostgreSQL.
+### 2. Backend (FastAPI)
 
 ```bash
-# Start PostgreSQL database in the background
-docker-compose up -d
-```
-
-### 3. Set up the Backend (FastAPI)
-
-We recommend using a dedicated Conda environment named `windwhisper` to isolate Python dependencies.
-
-```bash
-# Navigate to the backend directory
 cd backend
 
-# Create and activate a conda environment with Python 3.11
-conda create -n windwhisper python=3.11 -y
-conda activate windwhisper
+# Create and activate Conda environment
+conda create -n gokaatru python=3.11 -y
+conda activate gokaatru
 
-# Install the dependencies
-pip install -e .
+# Install dependencies (editable mode)
+pip install -e ".[dev]"
 
-# Run database migrations to set up your tables
+# Run database migrations
 alembic upgrade head
 
-# Start the FastApi backend server
+# Start the dev server (auto-reload)
 uvicorn app.main:app --reload
 ```
-*The backend API will be available at http://localhost:8000. You can view the automated Swagger docs at http://localhost:8000/docs .*
 
-*Note for Windows/PowerShell users:* If `conda activate windwhisper` doesn't work out of the box, ensure you initialize the Conda hook first:
-`. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"`
+The API is now at **http://localhost:8000** with Swagger docs at **http://localhost:8000/docs**.
 
-### 4. Set up the Frontend (React / Vite)
+> **Windows / PowerShell note:** If `conda activate` doesn't work, load the Conda hook first:
+> ```powershell
+> . "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"
+> conda activate gokaatru
+> ```
 
-Open a new terminal window to keep your backend server running, then navigate to your frontend directory.
+### 3. Frontend (React / Vite)
+
+Open a **second terminal**:
 
 ```bash
-# Navigate to the frontend directory
 cd frontend
-
-# Install the frontend dependencies
 npm install
-
-# Start the development server
 npm run dev
 ```
-*The frontend application will be hosted locally at http://localhost:5173 .*
+
+The frontend is at **http://localhost:5173** and proxies `/api` requests to the backend automatically.
+
+### 4. Running Tests
+
+**Backend tests** (requires a running PostgreSQL with a `gokaatru_test` database):
+
+```bash
+cd backend
+conda activate gokaatru
+python -m pytest tests/ -v
+```
+
+**Frontend tests:**
+
+```bash
+cd frontend
+npm test
+```
+
+---
+
+## Project Structure
+
+```
+GoKaatru/
+├── backend/
+│   ├── Dockerfile
+│   ├── pyproject.toml          # Python dependencies & build config
+│   ├── alembic.ini             # Database migration settings
+│   ├── alembic/                # Migration scripts
+│   ├── app/
+│   │   ├── main.py             # FastAPI application entry point
+│   │   ├── config.py           # Settings (env-driven)
+│   │   ├── database.py         # Async SQLAlchemy engine
+│   │   ├── api/                # Route handlers
+│   │   ├── models/             # SQLAlchemy ORM models
+│   │   ├── schemas/            # Pydantic request/response schemas
+│   │   ├── services/           # Business logic & computation
+│   │   └── utils/              # Shared helpers
+│   ├── scripts/                # Data generation utilities
+│   └── tests/                  # pytest test suite
+├── frontend/
+│   ├── Dockerfile
+│   ├── package.json
+│   ├── vite.config.ts
+│   └── src/
+│       ├── api/                # Axios API client modules
+│       ├── components/         # React components (by domain)
+│       ├── hooks/              # Custom React hooks
+│       ├── pages/              # Page-level components
+│       ├── stores/             # Zustand state stores
+│       └── types/              # TypeScript type definitions
+├── data/                       # Sample data files
+├── docs/                       # Documentation
+│   ├── api.md                  # API reference
+│   └── user-guide.md           # User walkthrough
+├── docker-compose.yml          # Full-stack Docker orchestration
+├── nginx.conf                  # Reverse proxy configuration
+├── .github/workflows/ci.yml   # GitHub Actions CI pipeline
+├── SPECIFICATIONS.md           # Detailed project specification
+└── README.md                   # This file
+```
+
+---
+
+## Environment Variables
+
+The backend reads settings from environment variables (or a `.env` file in `backend/`):
+
+| Variable | Default | Description |
+|---|---|---|
+| `DATABASE_URL` | `postgresql+asyncpg://windwhisper:windwhisper@localhost:5432/windwhisper` | Async database connection string |
+| `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | Allowed CORS origins (JSON array) |
+| `DEBUG` | `false` | Enable debug mode & verbose SQL logging |
+| `APP_VERSION` | `0.1.0` | Reported API version |
+
+---
+
+## API Overview
+
+All endpoints are prefixed with `/api`. Full reference: [docs/api.md](docs/api.md).
+
+| Group | Prefix | Description |
+|---|---|---|
+| Projects | `/api/projects` | CRUD for wind assessment projects |
+| Import | `/api/import` | Upload & confirm data files |
+| Datasets | `/api/datasets` | List datasets, get timeseries, manage columns |
+| QC | `/api/qc` | Flags, rules, tower-shadow, reconstruction |
+| Analysis | `/api/analysis` | Wind rose, histogram, Weibull, shear, turbulence, air density, extreme wind, energy, profiles, scatter |
+| MCP | `/api/mcp` | Correlate, predict, compare reference data |
+| Export | `/api/export` | CSV, WAsP TAB, IEA JSON, OpenWind, KML |
+| Reports | `/api/reports` | Generate PDF / DOCX reports |
+| Workflows | `/api/workflows` | Create, run & manage automation pipelines |
+
+Interactive API documentation is available at `/docs` (Swagger UI) and `/redoc` (ReDoc) when the backend is running.
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit your changes: `git commit -m "Add my feature"`
+4. Push to the branch: `git push origin feature/my-feature`
+5. Open a Pull Request
+
+Please ensure all tests pass before submitting a PR. The CI pipeline will run automatically on every push.
+
+---
+
+## License
+
+This project is open-source. See [LICENSE](LICENSE) for details.
+
+---
+
+*GoKaatru is an independent, open-source project for wind resource assessment.*
 
 ---
 
@@ -88,7 +258,7 @@ npm run dev
 * **Interactive Visualizations:** Time-series charts, wind roses, scatterplots, and frequency histograms.
 
 ## Contributing
-WindWhisper is totally open-source and welcomes contributions! Please feel free to check our open issues, submit pull requests, or share your ideas on how to improve wind resource assessment tooling. 
+GoKaatru is totally open-source and welcomes contributions! Please feel free to check our open issues, submit pull requests, or share your ideas on how to improve wind resource assessment tooling. 
 
 ## License
 This project is licensed under the [Apache 2.0 License](LICENSE).

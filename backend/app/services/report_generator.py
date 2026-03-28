@@ -97,7 +97,7 @@ class ResolvedReportSelections:
 
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
-    return slug or "windwhisper-report"
+    return slug or "gokaatru-report"
 
 
 def _report_file_name(project: Project, dataset: Dataset, report_format: ReportFormat) -> str:
@@ -272,7 +272,7 @@ async def _build_title_page(project: Project, dataset: Dataset, row_count: int, 
         paragraphs=[
             report_title,
             subtitle,
-            "WindWhisper generated this report from the selected project dataset using the current QC exclusions and analysis defaults.",
+            "GoKaatru generated this report from the selected project dataset using the current QC exclusions and analysis defaults.",
             " | ".join(location) if location else "Location metadata not available",
             f"Rows analyzed: {_format_count(row_count)}",
             f"Generated: {_format_datetime(datetime.now(UTC))}",

@@ -1,3 +1,3 @@
-# WindWhisper Backend
+# GoKaatru Backend
 
-FastAPI backend service for the WindWhisper wind resource analysis platform.
+FastAPI backend service for the GoKaatru wind resource analysis platform.

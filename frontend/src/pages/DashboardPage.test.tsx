@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   exportMocks.downloadProjectKmlExport.mockResolvedValue({
     blob: new Blob(["<kml></kml>"], { type: "application/vnd.google-earth.kml+xml" }),
-    fileName: "windwhisper-projects.kml",
+    fileName: "gokaatru-projects.kml",
     contentType: "application/vnd.google-earth.kml+xml",
   });
 });

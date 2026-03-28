@@ -1,4 +1,4 @@
-"""ORM models for WindWhisper."""
+"""ORM models for GoKaatru."""
 
 from app.models.analysis_result import AnalysisResult
 from app.models.change_log import ChangeLog

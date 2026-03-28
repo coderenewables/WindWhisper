@@ -1,1 +1,1 @@
-"""Service layer package for WindWhisper."""
+"""Service layer package for GoKaatru."""

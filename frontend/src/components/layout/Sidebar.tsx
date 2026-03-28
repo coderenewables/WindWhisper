@@ -38,7 +38,7 @@ export function Sidebar({ sections, collapsed, mobileOpen, onToggleCollapse, onT
         <div className="mb-8 flex items-center justify-between gap-3 px-2">
           <div className={collapsed ? "hidden lg:block" : "block"}>
             <p className="font-mono text-[10px] uppercase tracking-[0.32em] text-ember-300">Wind resource</p>
-            <h1 className="mt-2 text-xl font-semibold">WindWhisper</h1>
+            <h1 className="mt-2 text-xl font-semibold">GoKaatru</h1>
           </div>
           <button
             type="button"

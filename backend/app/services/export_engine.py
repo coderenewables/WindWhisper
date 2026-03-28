@@ -31,7 +31,7 @@ class ExportedArtifact:
 
 def _slugify(value: str) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", value.strip().lower()).strip("-")
-    return slug or "windwhisper-export"
+    return slug or "gokaatru-export"
 
 
 async def _load_dataset_with_project(db: AsyncSession, dataset_id: uuid.UUID) -> Dataset:
@@ -128,7 +128,7 @@ def _openwind_file_name(project: Project | None, dataset: Dataset) -> str:
 def _kml_file_name(projects: list[Project]) -> str:
     if len(projects) == 1:
         return f"{_slugify(projects[0].name)}.kml"
-    return "windwhisper-projects.kml"
+    return "gokaatru-projects.kml"
 
 
 def _sector_index(direction: pd.Series, sector_width: float) -> pd.Series:
@@ -183,7 +183,7 @@ async def _calculate_project_mean_speed(db: AsyncSession, project: Project) -> f
 
 
 def _project_kml_description(project: Project, mean_speed: float | None) -> str:
-    lines = [project.description or "WindWhisper project workspace"]
+    lines = [project.description or "GoKaatru project workspace"]
     if project.elevation is not None:
         lines.append(f"Elevation: {project.elevation:.1f} m")
     if mean_speed is not None:
@@ -448,13 +448,13 @@ async def export_kml(
 
     kml = ET.Element("kml", xmlns="http://www.opengis.net/kml/2.2")
     document = ET.SubElement(kml, "Document")
-    ET.SubElement(document, "name").text = "WindWhisper Projects"
+    ET.SubElement(document, "name").text = "GoKaatru Projects"
 
     if not projects:
         ET.indent(kml, space="  ")
         return ExportedArtifact(
             content=ET.tostring(kml, encoding="utf-8", xml_declaration=True),
-            file_name="windwhisper_projects.kml",
+            file_name="gokaatru_projects.kml",
             media_type="application/vnd.google-earth.kml+xml; charset=utf-8",
         )
 

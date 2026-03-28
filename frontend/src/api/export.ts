@@ -6,11 +6,11 @@ import type { CSVExportRequest, ExportDownload, IEAJSONExportRequest, KMLExportR
 function parseFileName(response: AxiosResponse<Blob>) {
   const header = response.headers["content-disposition"];
   if (!header) {
-    return "windwhisper-export.dat";
+    return "gokaatru-export.dat";
   }
 
   const match = /filename="?([^";]+)"?/i.exec(header);
-  return match?.[1] ?? "windwhisper-export.dat";
+  return match?.[1] ?? "gokaatru-export.dat";
 }
 
 

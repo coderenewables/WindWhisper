@@ -1,10 +1,10 @@
-# WindWhisper — Wind Resource Analysis Platform
+# GoKaatru — Wind Resource Analysis Platform
 ## Master Project Specification & Incremental Task List
 
 **Repository**: `coderenewables/wind-resource`  
 **License**: Apache 2.0  
 **Version**: 1.0 (March 2026)  
-**Purpose**: A comprehensive, open-source web application for wind resource assessment rivaling Windographer by UL Solutions.
+**Purpose**: A comprehensive, open-source web application for wind resource assessment.
 
 ---
 
@@ -14,7 +14,7 @@
 2. [Technical Architecture](#2-technical-architecture)
 3. [Technology Stack](#3-technology-stack)
 4. [Backend Execution Environment](#4-backend-execution-environment)
-5. [Feature Mapping](#5-feature-mapping-windographer-to-windwhisper)
+5. [Feature Mapping](#5-feature-mapping)
 6. [Development Phases](#6-development-phases)
 7. [Incremental Daily Tasks](#7-incremental-daily-tasks)
 
@@ -23,7 +23,7 @@
 ## 1. Project Overview
 
 ### 1.1 Goals
-Build an open-source, web-based wind data analysis platform ("WindWhisper") that covers the full wind resource assessment (WRA) workflow:
+Build an open-source, web-based wind data analysis platform ("GoKaatru") that covers the full wind resource assessment (WRA) workflow:
 
 - **Import** raw data from meteorological towers, LiDAR, SoDAR, CSV/Excel, and reanalysis datasets (ERA5, MERRA-2)
 - **Validate & QC** data with automated flagging rules and manual annotation
@@ -84,7 +84,7 @@ The application is a full-stack web app. One backend server handles computation;
 wind-resource/
 ├── LICENSE
 ├── README.md
-├── WINDOGRAPHER_RIVAL_SPEC.md          # This file
+├── SPECIFICATIONS.md                    # This file
 ├── docker-compose.yml                  # PostgreSQL + app services
 ├── .env.example
 │
@@ -249,7 +249,7 @@ wind-resource/
 ### 2.3 Database Schema (Core Tables)
 
 ```sql
--- Projects: top-level container (like a Windographer workbook)
+-- Projects: top-level container (workbook-style organiser)
 CREATE TABLE projects (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
@@ -376,9 +376,9 @@ CREATE TABLE analysis_results (
 
 ## 4. Backend Execution Environment
 
-All coding AI agents and human contributors must run backend Python commands inside the Conda environment named `windwhisper`. Do not run backend tasks against the base environment or any system Python interpreter.
+All coding AI agents and human contributors must run backend Python commands inside the Conda environment named `gokaatru`. Do not run backend tasks against the base environment or any system Python interpreter.
 
-The `windwhisper` Conda environment is already created for this repository. Agents should activate and use it; they should not recreate it unless the user explicitly asks for environment reprovisioning.
+The `gokaatru` Conda environment is already created for this repository. Agents should activate and use it; they should not recreate it unless the user explicitly asks for environment reprovisioning.
 
 ### 4.1 Required Shell Initialization
 
@@ -388,14 +388,14 @@ Before any backend command is run in a new shell session, initialize the Conda s
 
 ```powershell
 . "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"
-conda activate windwhisper
+conda activate gokaatru
 ```
 
 - **Bash/Zsh equivalent**:
 
 ```bash
 eval "$(conda shell.bash hook)"
-conda activate windwhisper
+conda activate gokaatru
 ```
 
 ### 4.2 Commands Covered By This Rule
@@ -410,16 +410,16 @@ This requirement applies to all backend-facing commands, including:
 
 ### 4.3 Agent Execution Policy
 
-- Coding AI agents must prepend backend terminal workflows with `. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"`, then run `conda activate windwhisper` before invoking Python tooling.
-- If a terminal session is already activated into `windwhisper`, agents may continue using it, but they must not assume activation across fresh shells.
-- Agents should assume the `windwhisper` environment already exists and should reuse it instead of creating a new Conda environment.
-- Documentation, examples, and acceptance criteria that mention backend commands should show the environment activation step or explicitly state that the command is run inside the activated `windwhisper` environment.
+- Coding AI agents must prepend backend terminal workflows with `. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"`, then run `conda activate gokaatru` before invoking Python tooling.
+- If a terminal session is already activated into `gokaatru`, agents may continue using it, but they must not assume activation across fresh shells.
+- Agents should assume the `gokaatru` environment already exists and should reuse it instead of creating a new Conda environment.
+- Documentation, examples, and acceptance criteria that mention backend commands should show the environment activation step or explicitly state that the command is run inside the activated `gokaatru` environment.
 
 ---
 
-## 5. Feature Mapping: Windographer → WindWhisper
+## 5. Feature Mapping
 
-| # | Windographer Feature | WindWhisper Task(s) | Priority |
+| # | Feature | GoKaatru Task(s) | Priority |
 |---|---------------------|-------------------|----------|
 | F1 | Multi-format file import (CSV, Excel, NRG, Campbell, LiDAR) | Tasks 4–6 | High |
 | F2 | Auto-detect data structure (columns, heights, time step) | Task 5 | High |
@@ -512,11 +512,11 @@ Undo system, workflows, testing, deployment, documentation.
    - Lifespan handler for DB connection pool
 5. Create `docker-compose.yml` with PostgreSQL 15 service (port 5432, volume for persistence)
 6. Create all `__init__.py` files for package structure
-7. When running backend setup or validation commands locally, always initialize the Conda hook and activate `windwhisper` before invoking Python tooling
+7. When running backend setup or validation commands locally, always initialize the Conda hook and activate `gokaatru` before invoking Python tooling
 
 **Acceptance Criteria**:
 - [ ] `docker-compose up -d` starts PostgreSQL
-- [ ] Running `. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"; conda activate windwhisper; uvicorn app.main:app --reload` from `backend/` starts the server on port 8000
+- [ ] Running `. "C:\ProgramData\anaconda3\shell\condabin\conda-hook.ps1"; conda activate gokaatru; uvicorn app.main:app --reload` from `backend/` starts the server on port 8000
 - [ ] `GET /api/health` returns 200 with JSON `{"status": "ok"}`
 - [ ] All package directories exist with `__init__.py`
 
@@ -555,12 +555,12 @@ Undo system, workflows, testing, deployment, documentation.
 2. Use `mapped_column` with SQLAlchemy 2.0 style
 3. Initialize Alembic with `alembic init alembic`
 4. Configure `alembic/env.py` to import all models and use `DATABASE_URL` from config
-5. Generate initial migration from the activated `windwhisper` environment: `alembic revision --autogenerate -m "initial tables"`
-6. Run migration from the activated `windwhisper` environment: `alembic upgrade head`
+5. Generate initial migration from the activated `gokaatru` environment: `alembic revision --autogenerate -m "initial tables"`
+6. Run migration from the activated `gokaatru` environment: `alembic upgrade head`
 
 **Acceptance Criteria**:
 - [ ] All 8 tables created in PostgreSQL after running migrations
-- [ ] `alembic current` run inside the activated `windwhisper` environment shows the head revision
+- [ ] `alembic current` run inside the activated `gokaatru` environment shows the head revision
 - [ ] Models can be imported: `from app.models import Project, Dataset, ...`
 - [ ] Relationships work (Dataset.project, Flag.dataset, etc.)
 
@@ -785,7 +785,7 @@ Undo system, workflows, testing, deployment, documentation.
 3. Configure TailwindCSS with dark mode support
 4. Create `AppShell.tsx` — main layout with:
    - Left sidebar (collapsible, 240px) with navigation: Dashboard, Projects, Import, Time Series, QC, Analysis, MCP, Energy, Export
-   - Top bar with app name "WindWhisper" and breadcrumbs
+   - Top bar with app name "GoKaatru" and breadcrumbs
    - Main content area
 5. Create `api/client.ts` — Axios instance with `baseURL: /api` and interceptors for error handling
 6. Create `api/projects.ts` — functions: `listProjects()`, `getProject(id)`, `createProject(data)`, `updateProject(id, data)`, `deleteProject(id)`
@@ -2076,7 +2076,7 @@ Undo system, workflows, testing, deployment, documentation.
    - Known shear profile (alpha=0.2) → verify extrapolation
    - Known MCP relationship → verify prediction
 3. Fix all bugs found during testing
-4. Run full test suite from the activated `windwhisper` environment: `pytest -v --tb=short`
+4. Run full test suite from the activated `gokaatru` environment: `pytest -v --tb=short`
 
 **Acceptance Criteria**:
 - [ ] All backend tests pass
@@ -2120,7 +2120,7 @@ Undo system, workflows, testing, deployment, documentation.
 6. **docs/api.md**: Full API reference (can auto-generate from FastAPI OpenAPI spec)
 7. **docs/user-guide.md**: Walkthrough of main workflows (import → QC → analysis → MCP → export)
 8. **GitHub Actions CI**: Run tests on push, lint check, build Docker images
-9. Document clearly in README and developer setup notes that all local backend commands must start by loading the Conda hook and activating `windwhisper`
+9. Document clearly in README and developer setup notes that all local backend commands must start by loading the Conda hook and activating `gokaatru`
 
 **Acceptance Criteria**:
 - [ ] `docker-compose up` starts the entire application
@@ -2180,4 +2180,4 @@ Station: <name>
 
 ---
 
-*This specification was generated from comprehensive research on Windographer by UL Solutions. WindWhisper is an independent, open-source project and is not affiliated with Windographer or UL Solutions.*
+*GoKaatru is an independent, open-source project for wind resource assessment.*

@@ -3,9 +3,9 @@ requires = ["hatchling>=1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "windwhisper-backend"
+name = "gokaatru-backend"
 version = "0.1.0"
-description = "FastAPI backend for the WindWhisper wind resource analysis platform"
+description = "FastAPI backend for the GoKaatru wind resource analysis platform"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

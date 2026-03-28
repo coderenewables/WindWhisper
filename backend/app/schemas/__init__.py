@@ -181,4 +181,4 @@ __all__ = [
 	"TimeSeriesResponse",
 	"UploadPreviewResponse",
 ]
-"""Pydantic schemas for WindWhisper."""
+"""Pydantic schemas for GoKaatru."""

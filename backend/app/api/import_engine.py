@@ -37,7 +37,7 @@ from app.services.file_parsers.auto_detect import infer_time_step_seconds
 
 router = APIRouter(prefix="/api/import", tags=["import"])
 DbSession = Annotated[AsyncSession, Depends(get_db)]
-IMPORT_DIR = Path(tempfile.gettempdir()) / "windwhisper_imports"
+IMPORT_DIR = Path(tempfile.gettempdir()) / "gokaatru_imports"
 TEXT_SUFFIXES = {".csv", ".txt", ".tsv"}
 EXCEL_SUFFIXES = {".xls", ".xlsx"}
 LOGGER_SUFFIXES = {".dat"}

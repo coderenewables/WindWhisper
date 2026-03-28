@@ -55,7 +55,7 @@ TEXT_SUFFIXES = {".csv", ".txt", ".tsv"}
 EXCEL_SUFFIXES = {".xls", ".xlsx"}
 LOGGER_SUFFIXES = {".dat"}
 SUPPORTED_IMPORT_SUFFIXES = TEXT_SUFFIXES | EXCEL_SUFFIXES | LOGGER_SUFFIXES
-ARTIFACT_DIR = Path(tempfile.gettempdir()) / "windwhisper_workflow_artifacts"
+ARTIFACT_DIR = Path(tempfile.gettempdir()) / "gokaatru_workflow_artifacts"
 
 
 def _utcnow() -> datetime:
@@ -584,7 +584,9 @@ async def _execute_run_mcp(db: AsyncSession, params: dict[str, Any]) -> dict[str
     site_column_id = _parse_uuid(params.get("site_column_id"), "site_column_id")
     ref_dataset_id = _parse_uuid(params.get("ref_dataset_id"), "ref_dataset_id")
     ref_column_id = _parse_uuid(params.get("ref_column_id"), "ref_column_id")
-    method = MCPMethod(str(params.get("method") or "linear"))
+    method = str(params.get("method") or "linear")
+    if method not in ("linear", "variance_ratio", "matrix"):
+        raise ValueError(f"Unsupported MCP method: {method}")
     site_exclude_flags = _parse_uuid_list(params.get("site_exclude_flags"), "site_exclude_flags")
     ref_exclude_flags = _parse_uuid_list(params.get("ref_exclude_flags"), "ref_exclude_flags")
     site_column_ids = [site_column_id, *_parse_uuid_list(params.get("site_column_ids"), "site_column_ids")]

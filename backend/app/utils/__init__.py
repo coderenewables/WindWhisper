@@ -1,1 +1,1 @@
-"""Utility helpers for WindWhisper."""
+"""Utility helpers for GoKaatru."""

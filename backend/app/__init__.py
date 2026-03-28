@@ -1,1 +1,1 @@
-"""WindWhisper backend package."""
+"""GoKaatru backend package."""

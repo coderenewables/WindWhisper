@@ -58,7 +58,11 @@ async def get_flag_or_404(db: AsyncSession, flag_id: uuid.UUID) -> Flag:
 async def get_dataset_or_404(db: AsyncSession, dataset_id: uuid.UUID) -> Dataset:
     statement = (
         select(Dataset)
-        .options(selectinload(Dataset.columns), selectinload(Dataset.flags))
+        .options(
+            selectinload(Dataset.columns),
+            selectinload(Dataset.flags).selectinload(Flag.rules),
+            selectinload(Dataset.flags).selectinload(Flag.ranges),
+        )
         .where(Dataset.id == dataset_id)
         .execution_options(populate_existing=True)
     )

@@ -1,21 +1,86 @@
 services:
+  # ── PostgreSQL Database ───────────────────────────────────────
   postgres:
     image: postgres:15
-    container_name: windwhisper-postgres
+    container_name: gokaatru-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: windwhisper
-      POSTGRES_USER: windwhisper
-      POSTGRES_PASSWORD: windwhisper
+      POSTGRES_DB: gokaatru
+      POSTGRES_USER: gokaatru
+      POSTGRES_PASSWORD: gokaatru
     ports:
       - "5432:5432"
     volumes:
-      - windwhisper-postgres-data:/var/lib/postgresql/data
+      - gokaatru-postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U windwhisper -d windwhisper"]
+      test: ["CMD-SHELL", "pg_isready -U gokaatru -d gokaatru"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  # ── Redis (task queue / cache) ────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: gokaatru-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── FastAPI Backend ───────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gokaatru-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://gokaatru:gokaatru@postgres:5432/gokaatru"
+      CORS_ORIGINS: '["http://localhost:3000","http://localhost:5173"]'
+      DEBUG: "false"
+    volumes:
+      - upload-data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # ── React Frontend (nginx) ───────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gokaatru-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  # ── Nginx Reverse Proxy ──────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: gokaatru-nginx
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_started
+
 volumes:
-  windwhisper-postgres-data:
+  gokaatru-postgres-data:
+  upload-data:
