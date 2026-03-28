@@ -338,6 +338,32 @@ export interface ExtremeWindSummary {
   warning_message: string | null;
 }
 
+export interface ScatterRequest {
+  x_column_id: string;
+  y_column_id: string;
+  color_column_id?: string;
+  exclude_flags?: string[];
+  max_points?: number;
+}
+
+export interface ScatterPoint {
+  x: number;
+  y: number;
+  color: number | null;
+}
+
+export interface ScatterResponse {
+  dataset_id: string;
+  x_column_id: string;
+  y_column_id: string;
+  color_column_id: string | null;
+  excluded_flag_ids: string[];
+  total_count: number;
+  sample_count: number;
+  is_downsampled: boolean;
+  points: ScatterPoint[];
+}
+
 export interface PowerCurvePoint {
   wind_speed_ms: number;
   power_kw: number;

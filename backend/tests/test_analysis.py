@@ -141,6 +141,48 @@ async def test_histogram_endpoint_returns_bins_and_stats(client: AsyncClient, db
     assert len(payload["bins"]) == 4
     assert [bin_entry["count"] for bin_entry in payload["bins"]] == [1, 0, 1, 1]
 
+async def test_scatter_endpoint_returns_paired_points_and_applies_flag_exclusions(client: AsyncClient, db_session: AsyncSession) -> None:
+    dataset, direction_column, speed_column, exclusion_flag = await _seed_analysis_dataset(db_session)
+
+    temperature_column = DataColumn(dataset_id=dataset.id, name="Temp_2m", measurement_type="temperature", height_m=2)
+    db_session.add(temperature_column)
+    await db_session.flush()
+
+    result = await db_session.execute(
+        select(TimeseriesData).where(TimeseriesData.dataset_id == dataset.id).order_by(TimeseriesData.timestamp.asc())
+    )
+    rows = result.scalars().all()
+    temperatures = [6.0, 7.0, 8.0, 9.0]
+    for row, temperature in zip(rows, temperatures):
+        row.values_json = {**row.values_json, "Temp_2m": temperature}
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/scatter/{dataset.id}",
+        json={
+            "x_column_id": str(direction_column.id),
+            "y_column_id": str(speed_column.id),
+            "color_column_id": str(temperature_column.id),
+            "exclude_flags": [str(exclusion_flag.id)],
+            "max_points": 500,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dataset_id"] == str(dataset.id)
+    assert payload["x_column_id"] == str(direction_column.id)
+    assert payload["y_column_id"] == str(speed_column.id)
+    assert payload["color_column_id"] == str(temperature_column.id)
+    assert payload["total_count"] == 3
+    assert payload["sample_count"] == 3
+    assert payload["is_downsampled"] is False
+    assert payload["points"] == [
+        {"x": 350.0, "y": 5.0, "color": 6.0},
+        {"x": 10.0, "y": 7.0, "color": 7.0},
+        {"x": 95.0, "y": 8.0, "color": 8.0},
+    ]
+
 
 async def test_weibull_endpoint_returns_fit_parameters_and_curve(client: AsyncClient, db_session: AsyncSession) -> None:
     project = Project(name="Weibull Site")

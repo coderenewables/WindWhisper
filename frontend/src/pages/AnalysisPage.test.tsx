@@ -15,6 +15,7 @@ const analysisMocks = vi.hoisted(() => ({
   getTurbulenceAnalysis: vi.fn(),
   getAirDensityAnalysis: vi.fn(),
   getExtremeWindAnalysis: vi.fn(),
+  getScatterAnalysis: vi.fn(),
   createExtrapolatedChannel: vi.fn(),
   getWeibullAnalysis: vi.fn(),
 }));
@@ -36,6 +37,7 @@ vi.mock("../api/analysis", () => ({
   getTurbulenceAnalysis: analysisMocks.getTurbulenceAnalysis,
   getAirDensityAnalysis: analysisMocks.getAirDensityAnalysis,
   getExtremeWindAnalysis: analysisMocks.getExtremeWindAnalysis,
+  getScatterAnalysis: analysisMocks.getScatterAnalysis,
   getWeibullAnalysis: analysisMocks.getWeibullAnalysis,
 }));
 
@@ -53,6 +55,17 @@ vi.mock("../components/analysis/WindRoseChart", () => ({
       <div>loading: {String(isLoading)}</div>
       <div>error: {error ?? "none"}</div>
       <div>samples: {data?.total_count ?? 0}</div>
+    </div>
+  ),
+}));
+
+vi.mock("../components/analysis/ScatterPlot", () => ({
+  ScatterPlot: ({ data, isLoading, error }: { data: { sample_count: number } | null; isLoading: boolean; error: string | null }) => (
+    <div>
+      <div>Scatter plot stub</div>
+      <div>loading: {String(isLoading)}</div>
+      <div>error: {error ?? "none"}</div>
+      <div>samples: {data?.sample_count ?? 0}</div>
     </div>
   ),
 }));
@@ -238,6 +251,20 @@ beforeEach(() => {
       { year: 2021, rank: 1, return_period_years: 6, speed: 25.7 },
     ],
   });
+  analysisMocks.getScatterAnalysis.mockResolvedValue({
+    dataset_id: "dataset-1",
+    x_column_id: "dir-1",
+    y_column_id: "spd-1",
+    color_column_id: "tmp-1",
+    excluded_flag_ids: [],
+    total_count: 24,
+    sample_count: 24,
+    is_downsampled: false,
+    points: [
+      { x: 0, y: 6, color: 8 },
+      { x: 90, y: 8, color: 10 },
+    ],
+  });
   analysisMocks.createExtrapolatedChannel.mockResolvedValue({
     dataset_id: "dataset-1",
     method: "power",
@@ -404,4 +431,24 @@ test("requests extreme wind analysis when the extreme wind tab is opened", async
 
   await screen.findByText(/extreme wind return periods/i);
   await screen.findByText(/^42.8 m\/s$/i, { selector: "div" });
+});
+
+test("requests scatter analysis when the scatter tab is opened", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/wind rose chart stub/i);
+  await user.click(screen.getByRole("button", { name: /scatter/i }));
+
+  await waitFor(() => {
+    expect(analysisMocks.getScatterAnalysis).toHaveBeenCalledWith("dataset-1", {
+      x_column_id: "dir-1",
+      y_column_id: "spd-1",
+      color_column_id: "tmp-1",
+      exclude_flags: [],
+    });
+  });
+
+  await screen.findByText(/scatter plot stub/i);
+  await screen.findByText(/samples: 24/i);
 });

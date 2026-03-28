@@ -13,6 +13,7 @@ DEFAULT_WEIBULL_CURVE_POINTS = 160
 DEFAULT_TURBULENCE_BIN_WIDTH = 1.0
 DEFAULT_EXTREME_WIND_RETURN_PERIODS = [10.0, 20.0, 50.0, 100.0]
 DEFAULT_ENERGY_SPEED_BIN_WIDTH = 1.0
+DEFAULT_SCATTER_MAX_POINTS = 10000
 WeibullMethod = Literal["mle", "moments"]
 ShearMethod = Literal["power", "log"]
 AirDensityPressureSource = Literal["auto", "measured", "estimated"]
@@ -369,6 +370,32 @@ class ExtremeWindResponse(BaseModel):
     return_periods: list[ExtremeWindReturnPeriodResponse] = Field(default_factory=list)
     return_period_curve: list[ExtremeWindReturnPeriodResponse] = Field(default_factory=list)
     observed_points: list[ExtremeWindObservedPointResponse] = Field(default_factory=list)
+
+
+class ScatterRequest(BaseModel):
+    x_column_id: uuid.UUID
+    y_column_id: uuid.UUID
+    color_column_id: uuid.UUID | None = None
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    max_points: Annotated[int, Field(default=DEFAULT_SCATTER_MAX_POINTS, ge=500, le=10000)] = DEFAULT_SCATTER_MAX_POINTS
+
+
+class ScatterPointResponse(BaseModel):
+    x: float
+    y: float
+    color: float | None = None
+
+
+class ScatterResponse(BaseModel):
+    dataset_id: uuid.UUID
+    x_column_id: uuid.UUID
+    y_column_id: uuid.UUID
+    color_column_id: uuid.UUID | None = None
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    total_count: int = 0
+    sample_count: int = 0
+    is_downsampled: bool = False
+    points: list[ScatterPointResponse] = Field(default_factory=list)
 
 
 class ExtrapolateRequest(BaseModel):

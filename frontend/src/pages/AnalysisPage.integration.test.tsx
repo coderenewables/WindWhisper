@@ -8,6 +8,10 @@ import { apiClient } from "../api/client";
 import { useProjectStore } from "../stores/projectStore";
 import { AnalysisPage } from "./AnalysisPage";
 
+vi.mock("react-plotly.js", () => ({
+  default: ({ className }: { className?: string }) => <div className={className}>Plotly stub</div>,
+}));
+
 const seededProject = {
   id: "project-seeded",
   name: "Seeded Analysis Site",
@@ -393,6 +397,48 @@ function buildExtremeWindResponse(payload: Record<string, unknown>) {
   };
 }
 
+function buildScatterResponse(payload: Record<string, unknown>) {
+  const visibleRows = getVisibleRows(Array.isArray(payload.exclude_flags) ? (payload.exclude_flags as string[]) : []);
+  const xColumnId = String(payload.x_column_id);
+  const yColumnId = String(payload.y_column_id);
+  const colorColumnId = payload.color_column_id ? String(payload.color_column_id) : null;
+
+  function valueForColumn(row: (typeof seededRows)[number], columnId: string) {
+    switch (columnId) {
+      case "dir-80m":
+        return row.direction;
+      case "spd-80m":
+        return row.speed;
+      case "spd-60m":
+        return row.speed * 0.92;
+      case "gst-80m":
+        return row.gust;
+      case "temp-2m":
+        return row.temp;
+      case "press-2m":
+        return row.pressure;
+      default:
+        return row.speed;
+    }
+  }
+
+  return {
+    dataset_id: seededDatasetSummary.id,
+    x_column_id: xColumnId,
+    y_column_id: yColumnId,
+    color_column_id: colorColumnId,
+    excluded_flag_ids: Array.isArray(payload.exclude_flags) ? payload.exclude_flags : [],
+    total_count: visibleRows.length,
+    sample_count: visibleRows.length,
+    is_downsampled: false,
+    points: visibleRows.map((row) => ({
+      x: valueForColumn(row, xColumnId),
+      y: valueForColumn(row, yColumnId),
+      color: colorColumnId ? valueForColumn(row, colorColumnId) : null,
+    })),
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={[`/analysis?projectId=${seededProject.id}&datasetId=${seededDatasetSummary.id}`]}>
@@ -451,6 +497,9 @@ beforeEach(() => {
     }
     if (url === `/analysis/extreme-wind/${seededDatasetSummary.id}`) {
       return makeResponse(buildExtremeWindResponse(payload as Record<string, unknown>));
+    }
+    if (url === `/analysis/scatter/${seededDatasetSummary.id}`) {
+      return makeResponse(buildScatterResponse(payload as Record<string, unknown>));
     }
     if (url === `/analysis/extrapolate/${seededDatasetSummary.id}`) {
       return makeResponse({
@@ -517,6 +566,43 @@ test("switches the live analysis page from wind rose to histogram using seeded b
 
   await screen.findByText(/wasp moments/i);
 });
+
+test("loads the live scatter workspace and refetches when QC exclusions change", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/samples used/i);
+  await user.click(screen.getByRole("button", { name: /scatter/i }));
+
+  await screen.findByText(/rendered points/i, {}, { timeout: 5000 });
+  await screen.findByText(/^4$/i, { selector: "div" }, { timeout: 5000 });
+  await screen.findByText(/polar scatter/i, {}, { timeout: 5000 });
+  await screen.findByText(/^Temp 2m$/i, { selector: "div" }, { timeout: 5000 });
+
+  await waitFor(() => {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/scatter/${seededDatasetSummary.id}`, {
+      x_column_id: "dir-80m",
+      y_column_id: "spd-80m",
+      color_column_id: "temp-2m",
+      exclude_flags: [],
+    });
+  });
+
+  await user.click(screen.getByLabelText(/exclude south/i));
+
+  await waitFor(() => {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/scatter/${seededDatasetSummary.id}`, {
+      x_column_id: "dir-80m",
+      y_column_id: "spd-80m",
+      color_column_id: "temp-2m",
+      exclude_flags: [seededFlags[0].id],
+    });
+  });
+
+  await waitFor(() => {
+    expect(screen.getByText(/^3$/i, { selector: "div" })).toBeInTheDocument();
+  });
+}, 15000);
 
 test("renders shear analysis and saves an extrapolated channel using seeded backend data", async () => {
   const user = userEvent.setup();

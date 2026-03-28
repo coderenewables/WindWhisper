@@ -46,6 +46,9 @@ from app.schemas.analysis import (
     PowerCurvePointResponse,
     PowerCurveSummaryResponse,
     PowerCurveUploadResponse,
+    ScatterPointResponse,
+    ScatterRequest,
+    ScatterResponse,
     ShearDirectionBinResponse,
     ShearPairResponse,
     ShearProfilePointResponse,
@@ -243,6 +246,19 @@ def _coerce_numeric_array(frame: pd.DataFrame, column_name: str) -> np.ndarray:
     return pd.to_numeric(frame[column_name], errors="coerce").to_numpy(dtype=float)
 
 
+def _build_scatter_frame(frame: pd.DataFrame, x_name: str, y_name: str, color_name: str | None) -> pd.DataFrame:
+    scatter_frame = pd.DataFrame(
+        {
+            "x": pd.to_numeric(frame[x_name], errors="coerce"),
+            "y": pd.to_numeric(frame[y_name], errors="coerce"),
+        },
+        index=frame.index,
+    )
+    if color_name is not None:
+        scatter_frame["color"] = pd.to_numeric(frame[color_name], errors="coerce")
+    return scatter_frame.dropna(subset=["x", "y"])
+
+
 def _json_safe_value(value: object) -> object:
     if isinstance(value, uuid.UUID):
         return str(value)
@@ -284,6 +300,62 @@ async def _get_power_curve_or_404(db: AsyncSession, curve_id: uuid.UUID) -> Powe
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Power curve not found")
     return record
+
+
+@router.post("/scatter/{dataset_id}", response_model=ScatterResponse)
+async def create_scatter_analysis(
+    dataset_id: uuid.UUID,
+    payload: ScatterRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ScatterResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    x_column = _resolve_column(dataset.columns, payload.x_column_id, "x_column_id")
+    y_column = _resolve_column(dataset.columns, payload.y_column_id, "y_column_id")
+    color_column = _resolve_column(dataset.columns, payload.color_column_id, "color_column_id") if payload.color_column_id is not None else None
+
+    column_ids = [x_column.id, y_column.id]
+    if color_column is not None:
+        column_ids.append(color_column.id)
+
+    frame = await get_clean_dataframe(db, dataset.id, column_ids=column_ids, exclude_flag_ids=payload.exclude_flags)
+    if frame.empty:
+        return ScatterResponse(
+            dataset_id=dataset.id,
+            x_column_id=x_column.id,
+            y_column_id=y_column.id,
+            color_column_id=color_column.id if color_column is not None else None,
+            excluded_flag_ids=payload.exclude_flags,
+        )
+
+    scatter_frame = _build_scatter_frame(frame, x_column.name, y_column.name, color_column.name if color_column is not None else None)
+    total_count = int(len(scatter_frame.index))
+    sampled = scatter_frame
+    is_downsampled = False
+
+    if total_count > payload.max_points:
+        rng = np.random.default_rng(42)
+        selected_indices = np.sort(rng.choice(total_count, size=payload.max_points, replace=False))
+        sampled = scatter_frame.iloc[selected_indices]
+        is_downsampled = True
+
+    return ScatterResponse(
+        dataset_id=dataset.id,
+        x_column_id=x_column.id,
+        y_column_id=y_column.id,
+        color_column_id=color_column.id if color_column is not None else None,
+        excluded_flag_ids=payload.exclude_flags,
+        total_count=total_count,
+        sample_count=int(len(sampled.index)),
+        is_downsampled=is_downsampled,
+        points=[
+            ScatterPointResponse(
+                x=float(record["x"]),
+                y=float(record["y"]),
+                color=None if pd.isna(record.get("color", np.nan)) else float(record["color"]),
+            )
+            for record in sampled.to_dict(orient="records")
+        ],
+    )
 
 
 @router.post("/wind-rose/{dataset_id}", response_model=WindRoseResponse)

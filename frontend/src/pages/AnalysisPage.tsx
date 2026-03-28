@@ -1,8 +1,8 @@
 import { AlertTriangle, BarChart3, Compass, GaugeCircle, ShieldCheck, Wind } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { createExtrapolatedChannel, getAirDensityAnalysis, getExtremeWindAnalysis, getHistogramAnalysis, getShearAnalysis, getTurbulenceAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
+import { createExtrapolatedChannel, getAirDensityAnalysis, getExtremeWindAnalysis, getHistogramAnalysis, getScatterAnalysis, getShearAnalysis, getTurbulenceAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
 import { AirDensityPanel } from "../components/analysis/AirDensityPanel";
 import { ExtremeWindPanel } from "../components/analysis/ExtremeWindPanel";
 import { FrequencyHistogram } from "../components/analysis/FrequencyHistogram";
@@ -13,11 +13,11 @@ import { listFlags } from "../api/qc";
 import { WindRoseChart } from "../components/analysis/WindRoseChart";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { useProjectStore } from "../stores/projectStore";
-import type { AirDensityPressureSource, AirDensityResponse, ExtremeWindResponse, HistogramRequest, HistogramResponse, ShearMethod, ShearResponse, TurbulenceResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
+import type { AirDensityPressureSource, AirDensityResponse, ExtremeWindResponse, HistogramRequest, HistogramResponse, ScatterResponse, ShearMethod, ShearResponse, TurbulenceResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
 import type { DatasetColumn, DatasetDetail, DatasetSummary } from "../types/dataset";
 import type { Flag } from "../types/qc";
 
-type AnalysisTab = "wind-rose" | "histogram" | "shear" | "turbulence" | "air-density" | "extreme-wind";
+type AnalysisTab = "wind-rose" | "histogram" | "shear" | "turbulence" | "air-density" | "extreme-wind" | "scatter";
 
 const analysisTabs: Array<{ id: AnalysisTab; label: string; description: string }> = [
   { id: "wind-rose", label: "Wind Rose", description: "Directional frequency, mean speed, and energy." },
@@ -26,7 +26,13 @@ const analysisTabs: Array<{ id: AnalysisTab; label: string; description: string 
   { id: "turbulence", label: "Turbulence", description: "IEC turbulence intensity analysis by speed bin and direction." },
   { id: "air-density", label: "Air Density", description: "Density and wind power density from measured or estimated pressure." },
   { id: "extreme-wind", label: "Extreme Wind", description: "Annual maxima, Gumbel fit, and long-return wind speeds." },
+  { id: "scatter", label: "Scatter", description: "Cross-channel scatterplots, density mode, regression fit, and polar diagnostics." },
 ];
+
+const ScatterPlot = lazy(async () => {
+  const module = await import("../components/analysis/ScatterPlot");
+  return { default: module.ScatterPlot };
+});
 
 function getDefaultDirectionColumn(columns: DatasetColumn[]) {
   return columns.find((column) => column.measurement_type === "direction")?.id ?? "";
@@ -76,6 +82,7 @@ export function AnalysisPage() {
   const [turbulenceData, setTurbulenceData] = useState<TurbulenceResponse | null>(null);
   const [airDensityData, setAirDensityData] = useState<AirDensityResponse | null>(null);
   const [extremeWindData, setExtremeWindData] = useState<ExtremeWindResponse | null>(null);
+  const [scatterData, setScatterData] = useState<ScatterResponse | null>(null);
   const [weibullData, setWeibullData] = useState<WeibullResponse | null>(null);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
   const [isLoadingDatasetDetail, setIsLoadingDatasetDetail] = useState(false);
@@ -86,6 +93,7 @@ export function AnalysisPage() {
   const [isLoadingTurbulence, setIsLoadingTurbulence] = useState(false);
   const [isLoadingAirDensity, setIsLoadingAirDensity] = useState(false);
   const [isLoadingExtremeWind, setIsLoadingExtremeWind] = useState(false);
+  const [isLoadingScatter, setIsLoadingScatter] = useState(false);
   const [isLoadingWeibull, setIsLoadingWeibull] = useState(false);
   const [isCreatingExtrapolatedChannel, setIsCreatingExtrapolatedChannel] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -95,6 +103,7 @@ export function AnalysisPage() {
   const [turbulenceError, setTurbulenceError] = useState<string | null>(null);
   const [airDensityError, setAirDensityError] = useState<string | null>(null);
   const [extremeWindError, setExtremeWindError] = useState<string | null>(null);
+  const [scatterError, setScatterError] = useState<string | null>(null);
   const [weibullError, setWeibullError] = useState<string | null>(null);
   const [createChannelError, setCreateChannelError] = useState<string | null>(null);
   const [createdChannelName, setCreatedChannelName] = useState<string | null>(null);
@@ -112,6 +121,9 @@ export function AnalysisPage() {
   const [selectedAirSpeedColumnId, setSelectedAirSpeedColumnId] = useState("");
   const [selectedExtremeSpeedColumnId, setSelectedExtremeSpeedColumnId] = useState("");
   const [selectedExtremeGustColumnId, setSelectedExtremeGustColumnId] = useState("");
+  const [selectedScatterXColumnId, setSelectedScatterXColumnId] = useState("");
+  const [selectedScatterYColumnId, setSelectedScatterYColumnId] = useState("");
+  const [selectedScatterColorColumnId, setSelectedScatterColorColumnId] = useState("");
   const [airPressureSource, setAirPressureSource] = useState<AirDensityPressureSource>("auto");
   const [airElevation, setAirElevation] = useState("");
   const { projects, fetchProjects } = useProjectStore();
@@ -177,6 +189,9 @@ export function AnalysisPage() {
       setSelectedAirSpeedColumnId("");
       setSelectedExtremeSpeedColumnId("");
       setSelectedExtremeGustColumnId("");
+      setSelectedScatterXColumnId("");
+      setSelectedScatterYColumnId("");
+      setSelectedScatterColorColumnId("");
       setAirElevation("");
       setRoseData(null);
       setHistogramData(null);
@@ -184,6 +199,7 @@ export function AnalysisPage() {
       setTurbulenceData(null);
       setAirDensityData(null);
       setExtremeWindData(null);
+      setScatterData(null);
       setWeibullData(null);
       return;
     }
@@ -216,6 +232,9 @@ export function AnalysisPage() {
         setSelectedAirSpeedColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "speed")?.id ?? ""));
         setSelectedExtremeSpeedColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "speed")?.id ?? ""));
         setSelectedExtremeGustColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "gust")?.id ?? ""));
+        setSelectedScatterXColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultDirectionColumn(response.columns) || getDefaultValueColumn(response.columns)));
+        setSelectedScatterYColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "speed")?.id ?? getDefaultValueColumn(response.columns)));
+        setSelectedScatterColorColumnId((current) => (current && isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "temperature")?.id ?? ""));
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -260,6 +279,18 @@ export function AnalysisPage() {
   const selectedHistogramColumn = useMemo(
     () => histogramColumns.find((column) => column.id === selectedHistogramColumnId) ?? null,
     [histogramColumns, selectedHistogramColumnId],
+  );
+  const selectedScatterXColumn = useMemo(
+    () => datasetDetail?.columns.find((column) => column.id === selectedScatterXColumnId) ?? null,
+    [datasetDetail, selectedScatterXColumnId],
+  );
+  const selectedScatterYColumn = useMemo(
+    () => datasetDetail?.columns.find((column) => column.id === selectedScatterYColumnId) ?? null,
+    [datasetDetail, selectedScatterYColumnId],
+  );
+  const selectedScatterColorColumn = useMemo(
+    () => datasetDetail?.columns.find((column) => column.id === selectedScatterColorColumnId) ?? null,
+    [datasetDetail, selectedScatterColorColumnId],
   );
   const histogramColumnLabel = selectedHistogramColumn?.name ?? "selected channel";
   const isWeibullAvailable = selectedHistogramColumn?.measurement_type === "speed";
@@ -519,6 +550,41 @@ export function AnalysisPage() {
       cancelled = true;
     };
   }, [activeTab, datasetId, excludedFlagIds, selectedExtremeGustColumnId, selectedExtremeSpeedColumnId]);
+
+  useEffect(() => {
+    if (activeTab !== "scatter" || !datasetId || !selectedScatterXColumnId || !selectedScatterYColumnId) {
+      setScatterError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingScatter(true);
+    setScatterError(null);
+
+    void getScatterAnalysis(datasetId, {
+      x_column_id: selectedScatterXColumnId,
+      y_column_id: selectedScatterYColumnId,
+      color_column_id: selectedScatterColorColumnId || undefined,
+      exclude_flags: excludedFlagIds,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setScatterData(response);
+          setIsLoadingScatter(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setScatterData(null);
+          setScatterError(error instanceof Error ? error.message : "Unable to build scatter analysis");
+          setIsLoadingScatter(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetId, excludedFlagIds, selectedScatterColorColumnId, selectedScatterXColumnId, selectedScatterYColumnId]);
 
   useEffect(() => {
     if (activeTab !== "histogram" || !datasetId || !histogramRequest) {
@@ -1248,6 +1314,97 @@ export function AnalysisPage() {
                   <section className="panel-surface p-8 text-sm text-ink-600">Select a mean wind-speed column to estimate annual maxima and return-period extremes.</section>
                 ) : (
                   <ExtremeWindPanel data={extremeWindData} isLoading={isLoadingExtremeWind} error={extremeWindError} />
+                )}
+              </div>
+            </section>
+          ) : activeTab === "scatter" ? (
+            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="space-y-4">
+                <section className="panel-surface p-5">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
+                  <div className="mt-4 space-y-4">
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      X axis
+                      <select value={selectedScatterXColumnId} onChange={(event) => setSelectedScatterXColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={datasetDetail.columns.length === 0}>
+                        <option value="">Select a column</option>
+                        {datasetDetail.columns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Y axis
+                      <select value={selectedScatterYColumnId} onChange={(event) => setSelectedScatterYColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={datasetDetail.columns.length === 0}>
+                        <option value="">Select a column</option>
+                        {datasetDetail.columns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Color by
+                      <select value={selectedScatterColorColumnId} onChange={(event) => setSelectedScatterColorColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white">
+                        <option value="">No color channel</option>
+                        {datasetDetail.columns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="panel-surface p-5">
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
+                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
+                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
+                  {!isLoadingFlags && flags.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {flags.map((flag) => {
+                        const excluded = excludedFlagIds.includes(flag.id);
+                        return (
+                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
+                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
+                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
+                            <span className="flex-1 text-sm text-ink-700">
+                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
+                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
+              </aside>
+
+              <div className="space-y-4">
+                {!selectedScatterXColumnId || !selectedScatterYColumnId ? (
+                  <section className="panel-surface p-8 text-sm text-ink-600">Select two columns to compare their paired values across the clean dataset.</section>
+                ) : (
+                  <Suspense
+                    fallback={
+                      <section className="panel-surface p-8">
+                        <LoadingSpinner label="Loading scatter workspace" />
+                      </section>
+                    }
+                  >
+                    <ScatterPlot
+                      data={scatterData}
+                      isLoading={isLoadingScatter}
+                      error={scatterError}
+                      xColumn={selectedScatterXColumn}
+                      yColumn={selectedScatterYColumn}
+                      colorColumn={selectedScatterColorColumn}
+                    />
+                  </Suspense>
                 )}
               </div>
             </section>

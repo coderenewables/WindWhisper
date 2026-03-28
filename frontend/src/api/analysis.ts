@@ -24,6 +24,8 @@ import type {
   PowerCurveLibraryListResponse,
   PowerCurveLibraryUpdateRequest,
   PowerCurveUploadResponse,
+  ScatterRequest,
+  ScatterResponse,
   ShearRequest,
   ShearResponse,
   TurbulenceRequest,
@@ -66,6 +68,11 @@ export async function getAirDensityAnalysis(datasetId: string, payload: AirDensi
 
 export async function getExtremeWindAnalysis(datasetId: string, payload: ExtremeWindRequest): Promise<ExtremeWindResponse> {
   const response = await apiClient.post<ExtremeWindResponse>(`/analysis/extreme-wind/${datasetId}`, payload);
+  return response.data;
+}
+
+export async function getScatterAnalysis(datasetId: string, payload: ScatterRequest): Promise<ScatterResponse> {
+  const response = await apiClient.post<ScatterResponse>(`/analysis/scatter/${datasetId}`, payload);
   return response.data;
 }
 
