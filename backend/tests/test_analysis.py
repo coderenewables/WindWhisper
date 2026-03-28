@@ -922,3 +922,272 @@ async def test_energy_estimate_endpoint_applies_air_density_adjustment(client: A
     assert payload["summary"]["pressure_source"] == "measured"
     assert payload["summary"]["annual_energy_mwh"] > 0
     assert payload["summary"]["mean_power_kw"] > 0
+
+
+# --- Known-value synthetic validation tests ---
+
+
+async def test_weibull_fit_recovers_known_parameters_k2_a7(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Generate Weibull(k=2.0, A=7.0) samples and verify the fit recovers the parameters."""
+    project = Project(name="Weibull Validation")
+    db_session.add(project)
+    await db_session.flush()
+
+    rng = np.random.default_rng(12345)
+    target_k, target_A = 2.0, 7.0
+    n_samples = 2000
+    sampled_speeds = rng.weibull(target_k, n_samples) * target_A
+    start_time = datetime(2025, 1, 1, 0, 0, tzinfo=UTC)
+
+    dataset = Dataset(
+        project_id=project.id,
+        name="Weibull Validation Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=(n_samples - 1) * 10),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add(speed_column)
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(minutes=i * 10),
+                values_json={"Speed_80m": float(sampled_speeds[i])},
+            )
+            for i in range(n_samples)
+        ],
+    )
+    await db_session.commit()
+
+    for method in ["mle", "moments"]:
+        response = await client.post(
+            f"/api/analysis/weibull/{dataset.id}",
+            json={"column_id": str(speed_column.id), "num_bins": 30, "method": method},
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert abs(payload["fit"]["k"] - target_k) < 0.15, f"{method}: k={payload['fit']['k']}"
+        assert abs(payload["fit"]["A"] - target_A) < 0.40, f"{method}: A={payload['fit']['A']}"
+        assert payload["fit"]["r_squared"] > 0.95
+
+
+async def test_shear_extrapolation_with_known_alpha_0_2(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Verify extrapolation from 60m to 100m with a known alpha=0.2."""
+    project = Project(name="Shear Validation")
+    db_session.add(project)
+    await db_session.flush()
+
+    alpha = 0.2
+    start_time = datetime(2025, 5, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Shear Validation Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=90),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    speed_60 = DataColumn(dataset_id=dataset.id, name="Speed_60m", measurement_type="speed", height_m=60)
+    speed_80 = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add_all([speed_60, speed_80])
+    await db_session.flush()
+
+    base_speeds = np.array([5.0, 6.5, 7.0, 8.0, 9.5, 10.0, 11.0, 8.5, 7.5, 6.0], dtype=float)
+    speeds_60 = base_speeds
+    speeds_80 = base_speeds * np.power(80.0 / 60.0, alpha)
+
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(minutes=i * 10),
+                values_json={"Speed_60m": float(speeds_60[i]), "Speed_80m": float(speeds_80[i])},
+            )
+            for i in range(10)
+        ],
+    )
+    await db_session.commit()
+
+    shear_response = await client.post(
+        f"/api/analysis/shear/{dataset.id}",
+        json={"target_height": 100, "method": "power"},
+    )
+    assert shear_response.status_code == 200
+    shear = shear_response.json()
+    assert abs(shear["pair_stats"][0]["mean_value"] - alpha) < 1e-6
+
+    extrap_response = await client.post(
+        f"/api/analysis/extrapolate/{dataset.id}",
+        json={
+            "target_height": 100,
+            "method": "power",
+            "create_column": True,
+            "column_name": "Speed_100m_extrap",
+        },
+    )
+    assert extrap_response.status_code == 200
+    extrap = extrap_response.json()
+    expected_100m = base_speeds * np.power(100.0 / 60.0, alpha)
+    for i, point in enumerate(extrap["values"]):
+        assert abs(point - float(expected_100m[i])) < 0.01
+
+
+async def test_air_density_formula_matches_ideal_gas_law(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Verify ρ = P / (R_d × T_K) with fixed T=15°C, P=1013.25 hPa → ρ ≈ 1.225."""
+    project = Project(name="Density Validation", elevation=0)
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 8, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Density Validation Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=10),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    temp = DataColumn(dataset_id=dataset.id, name="Temp_2m", measurement_type="temperature", height_m=2)
+    press = DataColumn(dataset_id=dataset.id, name="Press_hPa", measurement_type="pressure", height_m=2)
+    speed = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add_all([temp, press, speed])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(minutes=i * 10),
+                values_json={"Temp_2m": 15.0, "Press_hPa": 1013.25, "Speed_80m": 7.0},
+            )
+            for i in range(2)
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/air-density/{dataset.id}",
+        json={
+            "temperature_column_id": str(temp.id),
+            "pressure_column_id": str(press.id),
+            "speed_column_id": str(speed.id),
+            "pressure_source": "measured",
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    expected_rho = (1013.25 * 100.0) / (287.05 * 288.15)
+    assert abs(payload["summary"]["mean_density"] - expected_rho) < 0.001
+
+
+async def test_extreme_wind_gumbel_return_period_monotonically_increases(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Return period speeds should increase: V10 < V20 < V50 < V100."""
+    project = Project(name="Extreme Validation")
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2015, 1, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Extreme Validation Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=datetime(2025, 12, 31, 0, 0, tzinfo=UTC),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    speed_col = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add(speed_col)
+    await db_session.flush()
+
+    annual_maxima = [18.0, 19.5, 20.0, 21.5, 22.0, 23.5, 19.0, 20.5, 24.0, 21.0, 22.5]
+    for i, year in enumerate(range(2015, 2026)):
+        db_session.add(
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=datetime(year, 7, 1, 0, 0, tzinfo=UTC),
+                values_json={"Speed_80m": annual_maxima[i]},
+            ),
+        )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/extreme-wind/{dataset.id}",
+        json={"speed_column_id": str(speed_col.id)},
+    )
+    assert response.status_code == 200
+    rp = response.json()["return_periods"]
+    speeds = [entry["speed"] for entry in rp]
+    assert all(speeds[i] < speeds[i + 1] for i in range(len(speeds) - 1))
+
+
+async def test_turbulence_characteristic_at_15ms_matches_manual_calculation(client: AsyncClient, db_session: AsyncSession) -> None:
+    """Verify TI calculation: TI = σ / U, and characteristic TI at 15 m/s."""
+    project = Project(name="TI Validation")
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 9, 1, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="TI Validation Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=start_time,
+        end_time=start_time + timedelta(minutes=50),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    dir_col = DataColumn(dataset_id=dataset.id, name="Dir_80m", measurement_type="direction", height_m=80)
+    spd_col = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    sd_col = DataColumn(dataset_id=dataset.id, name="Speed_SD_80m", measurement_type="speed_sd", height_m=80)
+    db_session.add_all([dir_col, spd_col, sd_col])
+    await db_session.flush()
+
+    speeds = [14.5, 15.0, 15.5, 14.8, 15.2, 15.3]
+    sds = [1.8, 2.0, 2.2, 1.9, 2.1, 2.3]
+    dirs = [0, 60, 120, 180, 240, 300]
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=dataset.id,
+                timestamp=start_time + timedelta(minutes=i * 10),
+                values_json={"Dir_80m": float(dirs[i]), "Speed_80m": speeds[i], "Speed_SD_80m": sds[i]},
+            )
+            for i in range(6)
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/turbulence/{dataset.id}",
+        json={
+            "speed_column_id": str(spd_col.id),
+            "sd_column_id": str(sd_col.id),
+            "direction_column_id": str(dir_col.id),
+            "bin_width": 1.0,
+            "num_sectors": 12,
+        },
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    expected_tis = [sd / sp for sd, sp in zip(sds, speeds)]
+    assert abs(payload["summary"]["mean_ti"] - np.mean(expected_tis)) < 0.01
+    assert payload["summary"]["characteristic_ti_15"] is not None
+    assert payload["summary"]["iec_class"] is not None

@@ -615,3 +615,95 @@ async def test_delete_flag_is_recorded_and_can_be_undone(client: AsyncClient, db
     restored_flags = flags_response.json()
     assert len(restored_flags) == 1
     assert restored_flags[0]["name"] == "Transient"
+
+
+# --- Edge-case tests ---
+
+
+async def test_create_flag_with_duplicate_name_returns_error_or_succeeds(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, _, _ = await _seed_dataset(db_session)
+
+    first = await client.post(f"/api/qc/flags/{dataset.id}", json={"name": "Icing", "color": "#1f8f84"})
+    assert first.status_code == 201
+
+    second = await client.post(f"/api/qc/flags/{dataset.id}", json={"name": "Icing", "color": "#ef4444"})
+    assert second.status_code in {201, 409}
+
+
+async def test_apply_rules_with_no_rules_returns_empty_ranges(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, _, _ = await _seed_dataset(db_session)
+    flag_id = (
+        await client.post(f"/api/qc/flags/{dataset.id}", json={"name": "Empty rules", "color": "#aabbcc"})
+    ).json()["id"]
+
+    apply_response = await client.post(f"/api/qc/flags/{flag_id}/apply-rules")
+    assert apply_response.status_code == 200
+    assert apply_response.json() == []
+
+
+async def test_manual_flagging_with_invalid_column_id_returns_error(client: AsyncClient, db_session: AsyncSession) -> None:
+    _, dataset, _, _ = await _seed_dataset(db_session)
+    flag_id = (
+        await client.post(f"/api/qc/flags/{dataset.id}", json={"name": "Bad col", "color": "#000000"})
+    ).json()["id"]
+
+    response = await client.post(
+        f"/api/qc/flags/{flag_id}/manual",
+        json={
+            "start_time": "2025-01-01T00:00:00Z",
+            "end_time": "2025-01-01T00:10:00Z",
+            "column_ids": ["00000000-0000-0000-0000-000000000001"],
+        },
+    )
+
+    assert response.status_code in {400, 404}
+
+
+async def test_delete_nonexistent_flag_returns_404(client: AsyncClient, db_session: AsyncSession) -> None:
+    response = await client.delete("/api/qc/flags/00000000-0000-0000-0000-000000000001")
+    assert response.status_code == 404
+
+
+async def test_reconstruction_on_dataset_without_gaps_fills_nothing(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="No Gaps Site")
+    db_session.add(project)
+    await db_session.flush()
+
+    dataset = Dataset(
+        project_id=project.id,
+        name="Full Mast",
+        source_type="mast",
+        time_step_seconds=600,
+        start_time=datetime(2025, 4, 1, 0, 0, tzinfo=UTC),
+        end_time=datetime(2025, 4, 1, 0, 20, tzinfo=UTC),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    col = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add(col)
+    await db_session.flush()
+
+    base = datetime(2025, 4, 1, 0, 0, tzinfo=UTC)
+    db_session.add_all(
+        [
+            TimeseriesData(dataset_id=dataset.id, timestamp=base + timedelta(minutes=i * 10), values_json={"Speed_80m": 5.0 + i})
+            for i in range(3)
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/qc/reconstruct/{dataset.id}",
+        json={
+            "column_id": str(col.id),
+            "method": "interpolation",
+            "save_mode": "preview",
+            "max_gap_hours": 6,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["gap_count"] == 0
+    assert payload["summary"]["filled_count"] == 0

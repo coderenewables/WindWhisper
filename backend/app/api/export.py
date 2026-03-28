@@ -8,8 +8,8 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
-from app.schemas.export import CSVExportRequest, IEAJSONExportRequest, OpenwindExportRequest, WAsPTabExportRequest
-from app.services.export_engine import export_csv, export_iea_json, export_openwind, export_wasp_tab
+from app.schemas.export import CSVExportRequest, IEAJSONExportRequest, KMLExportRequest, OpenwindExportRequest, WAsPTabExportRequest
+from app.services.export_engine import export_csv, export_iea_json, export_kml, export_openwind, export_wasp_tab
 
 
 router = APIRouter(prefix="/api/export", tags=["export"])
@@ -84,4 +84,13 @@ async def download_openwind_export(
         exclude_flag_ids=payload.exclude_flags,
         resample=payload.resample,
     )
+    return _stream_artifact(artifact.content, artifact.file_name, artifact.media_type)
+
+
+@router.post("/kml")
+async def download_kml_export(
+    payload: KMLExportRequest,
+    db: AsyncSession = Depends(get_db),
+) -> StreamingResponse:
+    artifact = await export_kml(db, project_ids=payload.project_ids)
     return _stream_artifact(artifact.content, artifact.file_name, artifact.media_type)

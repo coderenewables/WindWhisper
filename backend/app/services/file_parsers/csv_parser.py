@@ -24,7 +24,10 @@ def sniff_delimiter(file_path: str) -> str:
 
 def _detect_timestamp_column(frame: pd.DataFrame) -> str:
     for column in frame.columns:
-        parsed = pd.to_datetime(frame[column], errors="coerce", utc=True)
+        series = frame[column]
+        if pd.api.types.is_numeric_dtype(series):
+            continue
+        parsed = pd.to_datetime(series, errors="coerce", utc=True)
         if parsed.notna().mean() >= 0.8:
             return str(column)
     raise ValueError("No timestamp column could be detected in the uploaded file")

@@ -1,6 +1,6 @@
 import axios, { type AxiosResponse } from "axios";
 
-import type { CSVExportRequest, ExportDownload, IEAJSONExportRequest, OpenwindExportRequest, WAsPTabExportRequest } from "../types/export";
+import type { CSVExportRequest, ExportDownload, IEAJSONExportRequest, KMLExportRequest, OpenwindExportRequest, WAsPTabExportRequest } from "../types/export";
 
 
 function parseFileName(response: AxiosResponse<Blob>) {
@@ -61,4 +61,9 @@ export async function downloadIeaJsonExport(datasetId: string, payload: IEAJSONE
 
 export async function downloadOpenwindExport(datasetId: string, payload: OpenwindExportRequest): Promise<ExportDownload> {
   return postExportBlob(`/export/openwind/${datasetId}`, payload);
+}
+
+
+export async function downloadProjectKmlExport(payload: KMLExportRequest): Promise<ExportDownload> {
+  return postExportBlob("/export/kml", payload);
 }

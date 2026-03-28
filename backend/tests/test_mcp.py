@@ -416,3 +416,136 @@ async def test_merra2_reference_download_task_imports_dataset(
 
     rows = (await db_session.execute(select(TimeseriesData).where(TimeseriesData.dataset_id == dataset.id))).scalars().all()
     assert len(rows) == 4
+
+
+# --- Known-value synthetic validation & edge-case tests ---
+
+
+async def test_mcp_variance_ratio_preserves_known_mean_and_std(client: AsyncClient, db_session: AsyncSession) -> None:
+    """With known concurrent data the variance ratio method should reproduce site_mean + (ref - ref_mean) * (site_std / ref_std)."""
+    site_dataset, site_column, reference_dataset, reference_column, reference_values = await _seed_mcp_datasets(db_session)
+
+    response = await client.post(
+        "/api/mcp/predict",
+        json={
+            "site_dataset_id": str(site_dataset.id),
+            "site_column_id": str(site_column.id),
+            "ref_dataset_id": str(reference_dataset.id),
+            "ref_column_id": str(reference_column.id),
+            "method": "variance_ratio",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["method"] == "variance_ratio"
+    assert abs(payload["params"]["std_ratio"] - 1.2) < 1e-9
+    assert payload["stats"]["rmse"] < 1e-9
+
+
+async def test_mcp_correlate_with_identical_datasets_gives_perfect_fit(client: AsyncClient, db_session: AsyncSession) -> None:
+    """When site == ref, slope=1, intercept=0, R²=1."""
+    project = Project(name="Identity MCP")
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2025, 6, 1, 0, 0, tzinfo=UTC)
+    ds = Dataset(
+        project_id=project.id,
+        name="Identity",
+        source_type="mast",
+        time_step_seconds=3600,
+        start_time=start_time,
+        end_time=start_time + timedelta(hours=9),
+    )
+    db_session.add(ds)
+    await db_session.flush()
+
+    col_a = DataColumn(dataset_id=ds.id, name="Speed_A", measurement_type="speed", height_m=80)
+    col_b = DataColumn(dataset_id=ds.id, name="Speed_B", measurement_type="speed", height_m=80)
+    db_session.add_all([col_a, col_b])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            TimeseriesData(
+                dataset_id=ds.id,
+                timestamp=start_time + timedelta(hours=i),
+                values_json={"Speed_A": 5.0 + i, "Speed_B": 5.0 + i},
+            )
+            for i in range(10)
+        ],
+    )
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/mcp/correlate",
+        json={
+            "site_dataset_id": str(ds.id),
+            "site_column_id": str(col_a.id),
+            "ref_dataset_id": str(ds.id),
+            "ref_column_id": str(col_b.id),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert abs(payload["stats"]["slope"] - 1.0) < 1e-9
+    assert abs(payload["stats"]["intercept"]) < 1e-9
+    assert payload["stats"]["r_squared"] > 0.9999
+
+
+async def test_mcp_predict_rejects_insufficient_overlap(client: AsyncClient, db_session: AsyncSession) -> None:
+    """With fewer than 2 concurrent points, the endpoint should fail."""
+    project = Project(name="No Overlap")
+    db_session.add(project)
+    await db_session.flush()
+
+    ds_site = Dataset(
+        project_id=project.id,
+        name="Site",
+        source_type="mast",
+        time_step_seconds=3600,
+        start_time=datetime(2025, 1, 1, 0, 0, tzinfo=UTC),
+        end_time=datetime(2025, 1, 1, 0, 0, tzinfo=UTC),
+    )
+    ds_ref = Dataset(
+        project_id=project.id,
+        name="Ref",
+        source_type="reanalysis",
+        time_step_seconds=3600,
+        start_time=datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
+        end_time=datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
+    )
+    db_session.add_all([ds_site, ds_ref])
+    await db_session.flush()
+
+    col_s = DataColumn(dataset_id=ds_site.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    col_r = DataColumn(dataset_id=ds_ref.id, name="Ref_100m", measurement_type="speed", height_m=100)
+    db_session.add_all([col_s, col_r])
+    await db_session.flush()
+
+    db_session.add(TimeseriesData(
+        dataset_id=ds_site.id,
+        timestamp=datetime(2025, 1, 1, 0, 0, tzinfo=UTC),
+        values_json={"Speed_80m": 6.0},
+    ))
+    db_session.add(TimeseriesData(
+        dataset_id=ds_ref.id,
+        timestamp=datetime(2026, 1, 1, 0, 0, tzinfo=UTC),
+        values_json={"Ref_100m": 7.0},
+    ))
+    await db_session.commit()
+
+    response = await client.post(
+        "/api/mcp/predict",
+        json={
+            "site_dataset_id": str(ds_site.id),
+            "site_column_id": str(col_s.id),
+            "ref_dataset_id": str(ds_ref.id),
+            "ref_column_id": str(col_r.id),
+            "method": "linear",
+        },
+    )
+
+    assert response.status_code in {400, 422}

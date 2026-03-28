@@ -4,6 +4,7 @@ import json
 import math
 import re
 import uuid
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from io import StringIO
@@ -12,11 +13,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import Float, cast, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models import DataColumn, Dataset, Project
+from app.models import DataColumn, Dataset, Project, TimeseriesData
 from app.services.qc_engine import get_clean_dataframe
 from app.services.weibull import fit_weibull
 
@@ -124,9 +125,71 @@ def _openwind_file_name(project: Project | None, dataset: Dataset) -> str:
     return f"{_base_file_stem(project, dataset)}-openwind.csv"
 
 
+def _kml_file_name(projects: list[Project]) -> str:
+    if len(projects) == 1:
+        return f"{_slugify(projects[0].name)}.kml"
+    return "windwhisper-projects.kml"
+
+
 def _sector_index(direction: pd.Series, sector_width: float) -> pd.Series:
     shifted = (direction + (sector_width / 2.0)) % 360.0
     return np.floor(shifted / sector_width).astype(int)
+
+
+async def _load_projects_for_kml(db: AsyncSession, project_ids: list[uuid.UUID] | None) -> list[Project]:
+    statement = (
+        select(Project)
+        .options(selectinload(Project.datasets).selectinload(Dataset.columns))
+        .order_by(Project.created_at.desc(), Project.id.desc())
+    )
+    if project_ids:
+        statement = statement.where(Project.id.in_(project_ids))
+
+    projects = list((await db.execute(statement)).scalars().unique().all())
+    if project_ids:
+        requested = set(project_ids)
+        found = {project.id for project in projects}
+        if found != requested:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more requested projects were not found")
+
+    return projects
+
+
+def _pick_representative_speed_column(project: Project) -> DataColumn | None:
+    speed_columns: list[tuple[datetime | None, float, DataColumn]] = []
+    fallback_timestamp = datetime.min.replace(tzinfo=UTC)
+
+    for dataset in project.datasets:
+        for column in dataset.columns:
+            if column.measurement_type == "speed":
+                speed_columns.append((dataset.created_at or fallback_timestamp, float(column.height_m or 0.0), column))
+
+    if not speed_columns:
+        return None
+
+    speed_columns.sort(key=lambda item: (item[0], item[1]), reverse=True)
+    return speed_columns[0][2]
+
+
+async def _calculate_project_mean_speed(db: AsyncSession, project: Project) -> float | None:
+    speed_column = _pick_representative_speed_column(project)
+    if speed_column is None:
+        return None
+
+    speed_expression = cast(TimeseriesData.values_json[speed_column.name].astext, Float)
+    statement = select(func.avg(speed_expression)).where(TimeseriesData.dataset_id == speed_column.dataset_id)
+    mean_speed = await db.scalar(statement)
+    return float(mean_speed) if mean_speed is not None else None
+
+
+def _project_kml_description(project: Project, mean_speed: float | None) -> str:
+    lines = [project.description or "WindWhisper project workspace"]
+    if project.elevation is not None:
+        lines.append(f"Elevation: {project.elevation:.1f} m")
+    if mean_speed is not None:
+        lines.append(f"Representative mean speed: {mean_speed:.2f} m/s")
+    lines.append(f"Datasets: {len(project.datasets)}")
+    return "\n".join(lines)
 
 
 async def _get_export_frame(
@@ -373,4 +436,50 @@ async def export_openwind(
         content=buffer.getvalue().encode("utf-8"),
         file_name=_openwind_file_name(project, dataset),
         media_type="text/csv; charset=utf-8",
+    )
+
+
+async def export_kml(
+    db: AsyncSession,
+    *,
+    project_ids: list[uuid.UUID] | None = None,
+) -> ExportedArtifact:
+    projects = await _load_projects_for_kml(db, project_ids)
+
+    kml = ET.Element("kml", xmlns="http://www.opengis.net/kml/2.2")
+    document = ET.SubElement(kml, "Document")
+    ET.SubElement(document, "name").text = "WindWhisper Projects"
+
+    if not projects:
+        ET.indent(kml, space="  ")
+        return ExportedArtifact(
+            content=ET.tostring(kml, encoding="utf-8", xml_declaration=True),
+            file_name="windwhisper_projects.kml",
+            media_type="application/vnd.google-earth.kml+xml; charset=utf-8",
+        )
+
+    mapped_projects: list[Project] = []
+    for project in projects:
+        if project.latitude is None or project.longitude is None:
+            continue
+
+        mapped_projects.append(project)
+        mean_speed = await _calculate_project_mean_speed(db, project)
+
+        placemark = ET.SubElement(document, "Placemark")
+        ET.SubElement(placemark, "name").text = project.name
+        ET.SubElement(placemark, "description").text = _project_kml_description(project, mean_speed)
+        point = ET.SubElement(placemark, "Point")
+        ET.SubElement(point, "coordinates").text = (
+            f"{float(project.longitude):.6f},{float(project.latitude):.6f},{float(project.elevation or 0.0):.3f}"
+        )
+
+    if not mapped_projects:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No selected projects include latitude and longitude coordinates")
+
+    ET.indent(kml, space="  ")
+    return ExportedArtifact(
+        content=ET.tostring(kml, encoding="utf-8", xml_declaration=True),
+        file_name=_kml_file_name(mapped_projects),
+        media_type="application/vnd.google-earth.kml+xml; charset=utf-8",
     )

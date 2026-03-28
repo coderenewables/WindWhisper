@@ -166,3 +166,89 @@ async def test_openwind_export_returns_date_time_csv_layout(client: AsyncClient,
     assert lines[0] == "Date,Time,Dir_80m,Speed_80m"
     assert lines[1] == "2025-06-01,00:00:00,350.0,5.0"
     assert lines[-1] == "2025-06-01,00:30:00,,"
+
+
+async def test_kml_export_returns_project_placemark_with_coordinates_and_metadata(client: AsyncClient, db_session: AsyncSession) -> None:
+    dataset, _, _, _, _ = await _seed_export_dataset(db_session)
+
+    response = await client.post(
+        "/api/export/kml",
+        json={"project_ids": [str(dataset.project_id)]},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/vnd.google-earth.kml+xml")
+    assert response.headers["content-disposition"].endswith('.kml"')
+    assert "<Placemark>" in response.text
+    assert "<name>Export Site</name>" in response.text
+    assert "76.912000,11.245000,1240.000" in response.text
+    assert "Representative mean speed: 7.25 m/s" in response.text
+
+
+# --- Edge-case tests ---
+
+
+async def test_csv_export_all_columns_when_none_specified(client: AsyncClient, db_session: AsyncSession) -> None:
+    dataset, direction_column, speed_column, temperature_column, _ = await _seed_export_dataset(db_session)
+
+    response = await client.post(
+        f"/api/export/csv/{dataset.id}",
+        json={},
+    )
+
+    assert response.status_code == 200
+    lines = response.text.strip().splitlines()
+    header = lines[0]
+    assert "Dir_80m" in header
+    assert "Speed_80m" in header
+    assert "Temp_2m" in header
+
+
+async def test_csv_export_nonexistent_dataset_returns_404(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/export/csv/00000000-0000-0000-0000-000000000001",
+        json={},
+    )
+
+    assert response.status_code == 404
+
+
+async def test_wasp_tab_export_with_invalid_speed_column_type_returns_400(client: AsyncClient, db_session: AsyncSession) -> None:
+    dataset, direction_column, _, temperature_column, _ = await _seed_export_dataset(db_session)
+
+    response = await client.post(
+        f"/api/export/wasp-tab/{dataset.id}",
+        json={
+            "speed_column_id": str(temperature_column.id),
+            "direction_column_id": str(direction_column.id),
+        },
+    )
+
+    assert response.status_code == 400
+
+
+async def test_iea_json_export_marks_excluded_rows_as_null(client: AsyncClient, db_session: AsyncSession) -> None:
+    dataset, direction_column, speed_column, _, exclusion_flag = await _seed_export_dataset(db_session)
+
+    response = await client.post(
+        f"/api/export/iea-json/{dataset.id}",
+        json={
+            "column_ids": [str(speed_column.id)],
+            "exclude_flags": [str(exclusion_flag.id)],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = json.loads(response.text)
+    last_row = payload["time_series"][-1]
+    assert last_row["values"]["Speed_80m"] is None
+
+
+async def test_kml_export_with_no_projects_returns_empty_document(client: AsyncClient) -> None:
+    response = await client.post(
+        "/api/export/kml",
+        json={"project_ids": []},
+    )
+
+    assert response.status_code == 200
+    assert "<kml" in response.text

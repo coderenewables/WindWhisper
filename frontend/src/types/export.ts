@@ -26,6 +26,10 @@ export interface OpenwindExportRequest {
   resample?: string;
 }
 
+export interface KMLExportRequest {
+  project_ids?: string[];
+}
+
 export interface ExportDownload {
   blob: Blob;
   fileName: string;

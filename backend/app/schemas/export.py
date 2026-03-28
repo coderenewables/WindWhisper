@@ -33,3 +33,7 @@ class OpenwindExportRequest(BaseModel):
     column_ids: list[uuid.UUID] = Field(default_factory=list)
     exclude_flags: list[uuid.UUID] = Field(default_factory=list)
     resample: str | None = None
+
+
+class KMLExportRequest(BaseModel):
+    project_ids: list[uuid.UUID] = Field(default_factory=list)

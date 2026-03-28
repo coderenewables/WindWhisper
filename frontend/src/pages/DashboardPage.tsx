@@ -4,8 +4,10 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 
+import { downloadProjectKmlExport } from "../api/export";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { Modal } from "../components/common/Modal";
+import { ProjectMap } from "../components/projects/ProjectMap";
 import { ProjectList } from "../components/projects/ProjectList";
 import { useProjectStore } from "../stores/projectStore";
 
@@ -22,6 +24,7 @@ type ProjectFormValues = z.output<typeof projectFormSchema>;
 
 export function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDownloadingKml, setIsDownloadingKml] = useState(false);
   const { projects, total, error, isLoadingProjects, isSubmitting, fetchProjects, createProject, clearError } = useProjectStore();
 
   const form = useForm<ProjectFormInput, unknown, ProjectFormValues>({
@@ -49,6 +52,31 @@ export function DashboardPage() {
     });
     form.reset();
     setIsModalOpen(false);
+  }
+
+  async function handleDownloadKml() {
+    setIsDownloadingKml(true);
+    clearError();
+
+    try {
+      const download = await downloadProjectKmlExport({
+        project_ids: projects.map((project) => project.id),
+      });
+
+      const url = window.URL.createObjectURL(download.blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = download.fileName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (downloadError) {
+      const message = downloadError instanceof Error ? downloadError.message : "Unable to export project KML";
+      useProjectStore.setState({ error: message });
+    } finally {
+      setIsDownloadingKml(false);
+    }
   }
 
   return (
@@ -92,7 +120,7 @@ export function DashboardPage() {
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_360px]">
         <div className="space-y-4">
           {error ? (
             <div className="panel-surface flex items-start gap-3 border border-red-200 bg-red-50/80 p-4 text-sm text-red-700">
@@ -125,6 +153,8 @@ export function DashboardPage() {
               </button>
             </div>
           )}
+
+          <ProjectMap projects={projects} isDownloadingKml={isDownloadingKml} onDownloadKml={() => void handleDownloadKml()} />
         </div>
 
         <aside className="panel-surface p-6">

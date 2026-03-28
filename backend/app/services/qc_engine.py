@@ -238,7 +238,7 @@ async def apply_rules(db: AsyncSession, dataset_id: uuid.UUID, flag_id: uuid.UUI
     if flag.dataset_id != dataset_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Flag does not belong to this dataset")
     if not flag.rules:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Flag has no rules to apply")
+        return []
 
     if loaded.frame.empty:
         await db.execute(delete(FlaggedRange).where(FlaggedRange.flag_id == flag_id, FlaggedRange.applied_by == "auto"))

@@ -277,3 +277,79 @@ async def test_confirm_campbell_import_persists_units_metadata(client: AsyncClie
     assert dataset.metadata_json["parser_type"] == "campbell"
     assert dataset.metadata_json["source_metadata"]["column_metadata"]["WS_80m_Avg"]["unit"] == "m/s"
     assert dataset.metadata_json["source_metadata"]["logger_info"]["format"] == "TOA5"
+
+
+# --- Edge-case tests ---
+
+
+async def test_upload_empty_csv_returns_400(client: AsyncClient) -> None:
+    project_id = await create_project_for_import(client)
+
+    response = await client.post(
+        f"/api/import/upload/{project_id}",
+        files={"file": ("empty.csv", b"", "text/csv")},
+    )
+
+    assert response.status_code == 400
+
+
+async def test_upload_header_only_csv_returns_400(client: AsyncClient) -> None:
+    project_id = await create_project_for_import(client)
+    header_only = b"Timestamp,Speed_80m,Dir_80m\n"
+
+    response = await client.post(
+        f"/api/import/upload/{project_id}",
+        files={"file": ("header_only.csv", header_only, "text/csv")},
+    )
+
+    assert response.status_code == 400
+
+
+async def test_upload_csv_missing_timestamp_column_returns_400(client: AsyncClient) -> None:
+    project_id = await create_project_for_import(client)
+    no_timestamp = b"Speed_80m,Dir_80m\n5.0,180\n6.0,190\n"
+
+    response = await client.post(
+        f"/api/import/upload/{project_id}",
+        files={"file": ("no_ts.csv", no_timestamp, "text/csv")},
+    )
+
+    assert response.status_code == 400
+
+
+async def test_upload_semicolon_delimited_csv_is_auto_detected(client: AsyncClient) -> None:
+    project_id = await create_project_for_import(client)
+    semicolon_csv = (
+        "Timestamp;Speed_40m;Dir_40m\n"
+        "2025-06-01T00:00:00Z;5.3;280\n"
+        "2025-06-01T00:10:00Z;5.7;275\n"
+        "2025-06-01T00:20:00Z;6.1;270\n"
+    )
+
+    response = await client.post(
+        f"/api/import/upload/{project_id}",
+        files={"file": ("semi.csv", semicolon_csv.encode(), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["delimiter"] == ";"
+    assert payload["row_count"] == 3
+
+
+async def test_upload_csv_with_all_nan_values_returns_preview(client: AsyncClient) -> None:
+    project_id = await create_project_for_import(client)
+    nan_csv = (
+        "Timestamp,Speed_40m,Dir_40m\n"
+        "2025-07-01T00:00:00Z,,\n"
+        "2025-07-01T00:10:00Z,,\n"
+    )
+
+    response = await client.post(
+        f"/api/import/upload/{project_id}",
+        files={"file": ("nan.csv", nan_csv.encode(), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["row_count"] == 2
