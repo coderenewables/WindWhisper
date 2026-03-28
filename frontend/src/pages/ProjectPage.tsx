@@ -2,9 +2,11 @@ import { ArrowLeft, CheckCircle2, Database, FileUp, LineChart, MapPin, Radar, Sh
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 
-import { listProjectDatasets } from "../api/datasets";
+import { getDatasetHistory, listProjectDatasets, undoDatasetChange } from "../api/datasets";
+import { HistoryPanel } from "../components/common/HistoryPanel";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import type { DatasetImportResponse, DatasetSummary } from "../types/dataset";
+import type { ChangeLogEntry } from "../types/history";
 import { useProjectStore } from "../stores/projectStore";
 
 export function ProjectPage() {
@@ -14,8 +16,38 @@ export function ProjectPage() {
   const importedDataset = (location.state as { importedDataset?: DatasetImportResponse } | null)?.importedDataset;
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
+  const [historyDatasetId, setHistoryDatasetId] = useState("");
+  const [historyChanges, setHistoryChanges] = useState<ChangeLogEntry[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [isUndoingHistory, setIsUndoingHistory] = useState(false);
 
   const project = activeProject?.id === params.id ? activeProject : projects.find((item) => item.id === params.id) ?? null;
+
+  async function refreshDatasets(projectId: string) {
+    setIsLoadingDatasets(true);
+    try {
+      const response = await listProjectDatasets(projectId);
+      setDatasets(response.datasets);
+      setHistoryDatasetId((current) => {
+        if (response.datasets.some((dataset) => dataset.id === current)) {
+          return current;
+        }
+        return response.datasets[0]?.id ?? "";
+      });
+    } finally {
+      setIsLoadingDatasets(false);
+    }
+  }
+
+  async function refreshHistory(datasetId: string) {
+    setIsLoadingHistory(true);
+    try {
+      const response = await getDatasetHistory(datasetId);
+      setHistoryChanges(response.changes);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }
 
   useEffect(() => {
     if (params.id) {
@@ -34,6 +66,12 @@ export function ProjectPage() {
       .then((response) => {
         if (!cancelled) {
           setDatasets(response.datasets);
+          setHistoryDatasetId((current) => {
+            if (response.datasets.some((dataset) => dataset.id === current)) {
+              return current;
+            }
+            return response.datasets[0]?.id ?? "";
+          });
           setIsLoadingDatasets(false);
         }
       })
@@ -48,6 +86,47 @@ export function ProjectPage() {
       cancelled = true;
     };
   }, [importedDataset, params.id]);
+
+  useEffect(() => {
+    if (!historyDatasetId) {
+      setHistoryChanges([]);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingHistory(true);
+    void getDatasetHistory(historyDatasetId)
+      .then((response) => {
+        if (!cancelled) {
+          setHistoryChanges(response.changes);
+          setIsLoadingHistory(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setHistoryChanges([]);
+          setIsLoadingHistory(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [historyDatasetId]);
+
+  async function handleUndoLatestChange() {
+    if (!historyDatasetId || !params.id) {
+      return;
+    }
+
+    setIsUndoingHistory(true);
+    try {
+      await undoDatasetChange(historyDatasetId);
+      await Promise.all([refreshDatasets(params.id), refreshHistory(historyDatasetId)]);
+    } finally {
+      setIsUndoingHistory(false);
+    }
+  }
 
   if (!project && !error) {
     return (
@@ -138,86 +217,105 @@ export function ProjectPage() {
               </div>
             </div>
 
-            <div className="mt-8">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-teal-500">Datasets</p>
-                  <h2 className="mt-2 text-2xl font-semibold text-ink-900">Available time-series sources</h2>
-                </div>
-                {project.dataset_count > 0 ? (
-                  <div className="flex flex-wrap gap-3">
-                    <Link
-                      to={`/time-series?projectId=${project.id}${datasets[0] ? `&datasetId=${datasets[0].id}` : ""}`}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
-                    >
-                      <LineChart className="h-4 w-4" />
-                      Time-series
-                    </Link>
-                    <Link
-                      to={`/qc?projectId=${project.id}${datasets[0] ? `&datasetId=${datasets[0].id}` : ""}`}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
-                    >
-                      <ShieldCheck className="h-4 w-4" />
-                      QC workspace
-                    </Link>
-                    <Link
-                      to={`/mcp?projectId=${project.id}${datasets[1] ? `&siteDatasetId=${datasets[0].id}&refDatasetId=${datasets[1].id}` : datasets[0] ? `&siteDatasetId=${datasets[0].id}&refDatasetId=${datasets[0].id}` : ""}`}
-                      className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
-                    >
-                      <Radar className="h-4 w-4" />
-                      MCP workspace
-                    </Link>
+            <div className="mt-8 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_380px]">
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-teal-500">Datasets</p>
+                    <h2 className="mt-2 text-2xl font-semibold text-ink-900">Available time-series sources</h2>
                   </div>
-                ) : null}
+                  {project.dataset_count > 0 ? (
+                    <div className="flex flex-wrap gap-3">
+                      <Link
+                        to={`/time-series?projectId=${project.id}${datasets[0] ? `&datasetId=${datasets[0].id}` : ""}`}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+                      >
+                        <LineChart className="h-4 w-4" />
+                        Time-series
+                      </Link>
+                      <Link
+                        to={`/qc?projectId=${project.id}${datasets[0] ? `&datasetId=${datasets[0].id}` : ""}`}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+                      >
+                        <ShieldCheck className="h-4 w-4" />
+                        QC workspace
+                      </Link>
+                      <Link
+                        to={`/mcp?projectId=${project.id}${datasets[1] ? `&siteDatasetId=${datasets[0].id}&refDatasetId=${datasets[1].id}` : datasets[0] ? `&siteDatasetId=${datasets[0].id}&refDatasetId=${datasets[0].id}` : ""}`}
+                        className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+                      >
+                        <Radar className="h-4 w-4" />
+                        MCP workspace
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+
+                {isLoadingDatasets ? (
+                  <div className="mt-4 panel-surface p-4">
+                    <LoadingSpinner label="Loading datasets" />
+                  </div>
+                ) : datasets.length > 0 ? (
+                  <div className="mt-4 grid gap-4 xl:grid-cols-2">
+                    {datasets.map((dataset) => (
+                      <div key={dataset.id} className="panel-muted flex items-center justify-between gap-4 px-4 py-4">
+                        <div className="min-w-0">
+                          <p className="text-lg font-semibold text-ink-900">{dataset.name}</p>
+                          <p className="mt-1 text-sm leading-7 text-ink-600">
+                            {dataset.row_count.toLocaleString()} rows · {dataset.column_count} channels
+                          </p>
+                        </div>
+                        <div className="text-right text-xs uppercase tracking-[0.18em] text-ink-500">
+                          <p>{dataset.time_step_seconds ? `${Math.round(dataset.time_step_seconds / 60)} min` : "variable step"}</p>
+                          <p className="mt-1">{dataset.source_type ?? "uploaded"}</p>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <Link
+                            to={`/time-series?projectId=${project.id}&datasetId=${dataset.id}`}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+                          >
+                            <LineChart className="h-4 w-4" />
+                            Chart
+                          </Link>
+                          <Link
+                            to={`/qc?projectId=${project.id}&datasetId=${dataset.id}`}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+                          >
+                            <ShieldCheck className="h-4 w-4" />
+                            QC
+                          </Link>
+                          <Link
+                            to={`/mcp?projectId=${project.id}&siteDatasetId=${dataset.id}&refDatasetId=${datasets.find((item) => item.id !== dataset.id)?.id ?? dataset.id}`}
+                            className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+                          >
+                            <Radar className="h-4 w-4" />
+                            MCP
+                          </Link>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="mt-4 panel-muted px-4 py-4 text-sm text-ink-600">No datasets have been imported for this project yet.</div>
+                )}
               </div>
 
-              {isLoadingDatasets ? (
-                <div className="mt-4 panel-surface p-4">
-                  <LoadingSpinner label="Loading datasets" />
-                </div>
-              ) : datasets.length > 0 ? (
-                <div className="mt-4 grid gap-4 xl:grid-cols-2">
-                  {datasets.map((dataset) => (
-                    <div key={dataset.id} className="panel-muted flex items-center justify-between gap-4 px-4 py-4">
-                      <div className="min-w-0">
-                        <p className="text-lg font-semibold text-ink-900">{dataset.name}</p>
-                        <p className="mt-1 text-sm leading-7 text-ink-600">
-                          {dataset.row_count.toLocaleString()} rows · {dataset.column_count} channels
-                        </p>
-                      </div>
-                      <div className="text-right text-xs uppercase tracking-[0.18em] text-ink-500">
-                        <p>{dataset.time_step_seconds ? `${Math.round(dataset.time_step_seconds / 60)} min` : "variable step"}</p>
-                        <p className="mt-1">{dataset.source_type ?? "uploaded"}</p>
-                      </div>
-                      <div className="flex shrink-0 gap-2">
-                        <Link
-                          to={`/time-series?projectId=${project.id}&datasetId=${dataset.id}`}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
-                        >
-                          <LineChart className="h-4 w-4" />
-                          Chart
-                        </Link>
-                        <Link
-                          to={`/qc?projectId=${project.id}&datasetId=${dataset.id}`}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
-                        >
-                          <ShieldCheck className="h-4 w-4" />
-                          QC
-                        </Link>
-                        <Link
-                          to={`/mcp?projectId=${project.id}&siteDatasetId=${dataset.id}&refDatasetId=${datasets.find((item) => item.id !== dataset.id)?.id ?? dataset.id}`}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-ink-200 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
-                        >
-                          <Radar className="h-4 w-4" />
-                          MCP
-                        </Link>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="mt-4 panel-muted px-4 py-4 text-sm text-ink-600">No datasets have been imported for this project yet.</div>
-              )}
+              <div className="space-y-4">
+                {datasets.length > 0 ? (
+                  <label className="grid gap-2 text-sm font-medium text-ink-800">
+                    History dataset
+                    <select value={historyDatasetId} onChange={(event) => setHistoryDatasetId(event.target.value)} className="rounded-2xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800 shadow-sm outline-none transition focus:border-teal-400 focus:ring-2 focus:ring-teal-100">
+                      {datasets.map((dataset) => (
+                        <option key={dataset.id} value={dataset.id}>
+                          {dataset.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : null}
+
+                <HistoryPanel changes={historyChanges} isLoading={isLoadingHistory} isUndoing={isUndoingHistory} onUndoLatest={handleUndoLatestChange} />
+              </div>
             </div>
           </>
         ) : (

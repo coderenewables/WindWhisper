@@ -84,6 +84,7 @@ from app.schemas.analysis import (
 from app.services.air_density import air_density_summary, build_density_points, calculate_air_density, estimate_pressure_from_elevation, monthly_averages, wind_power_density
 from app.services.energy_estimate import ensure_seeded_default_power_curve, energy_by_month, energy_by_speed_bin, gross_energy_estimate, load_power_curve, parse_power_curve_csv, summarize_power_curve
 from app.services.extreme_wind import extreme_wind_summary
+from app.services.history import COLUMN_ADDED_ACTION_TYPE, record_change, serialize_column_snapshot
 from app.services.qc_engine import filter_flagged_data, get_clean_dataframe, get_dataset_or_404, load_dataset_frame
 from app.services.turbulence import build_scatter_points, calculate_ti, iec_reference_curves, ti_by_direction, ti_by_speed_bin, ti_summary
 from app.services.weibull import fit_weibull, weibull_pdf
@@ -125,7 +126,7 @@ def _resolve_column(dataset_columns: list[DataColumn], column_id: uuid.UUID, lab
 
 def _sector_index(direction: pd.Series, sector_width: float) -> pd.Series:
     shifted = (direction + (sector_width / 2.0)) % 360.0
-    return np.floor(shifted / sector_width).astype(int)
+    return pd.Series(np.floor(shifted / sector_width).astype(int), index=direction.index, dtype=int)
 
 
 def _serialize_histogram_stats(series: pd.Series, raw_count: int) -> HistogramStatsResponse:
@@ -162,7 +163,7 @@ async def _load_clean_numeric_series(
     return raw_series, clean_series
 
 
-def _resolve_histogram_edges(series: pd.Series, payload: HistogramRequest) -> np.ndarray:
+def _resolve_histogram_edges(series: pd.Series, payload: HistogramRequest | WeibullRequest) -> np.ndarray:
     lower_bound = payload.min_val if payload.min_val is not None else float(series.min())
     upper_bound = payload.max_val if payload.max_val is not None else float(series.max())
 
@@ -207,14 +208,14 @@ def _speed_columns_with_heights(dataset_columns: list[DataColumn], requested_ids
         if len(selected) != len(requested_set):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One or more requested speed columns do not belong to this dataset")
 
-    unique_heights = {float(column.height_m) for column in selected if column.height_m is not None}
+    unique_heights = {_column_height(column) for column in selected}
     if len(unique_heights) < 2:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="At least two wind speed columns with distinct heights are required for shear analysis",
         )
 
-    return sorted(selected, key=lambda column: (float(column.height_m or 0.0), column.name))
+    return sorted(selected, key=lambda column: (_column_height(column), column.name))
 
 
 def _serialize_shear_response(
@@ -411,10 +412,54 @@ async def _resolve_project_elevation(db: AsyncSession, project_id: uuid.UUID) ->
     return float(value) if value is not None else None
 
 
+def _optional_float(value: object) -> float | None:
+    if value is None:
+        return None
+    if not isinstance(value, (int, float, str)):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _column_height(column: DataColumn) -> float:
+    if column.height_m is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Column {column.name} is missing a measurement height")
+    return float(column.height_m)
+
+
+def _serialize_power_curve_summary(summary: dict[str, Any]) -> PowerCurveSummaryResponse:
+    return PowerCurveSummaryResponse(
+        point_count=int(summary.get("point_count") or 0),
+        rated_power_kw=float(summary.get("rated_power_kw") or 0.0),
+        cut_in_speed_ms=_optional_float(summary.get("cut_in_speed_ms")),
+        rated_speed_ms=_optional_float(summary.get("rated_speed_ms")),
+        cut_out_speed_ms=_optional_float(summary.get("cut_out_speed_ms")),
+    )
+
+
+def _serialize_weibull_fit(fit: dict[str, float | str]) -> WeibullFitResponse:
+    method = "moments" if fit.get("method") == "moments" else "mle"
+    return WeibullFitResponse(
+        method=method,
+        k=float(fit["k"]),
+        A=float(fit["A"]),
+        mean_speed=float(fit["mean_speed"]),
+        mean_power_density=float(fit["mean_power_density"]),
+        r_squared=float(fit["r_squared"]),
+        rmse=float(fit["rmse"]),
+        ks_stat=float(fit["ks_stat"]),
+    )
+
+
 def _serialize_power_curve(curve: pd.DataFrame) -> list[PowerCurvePointResponse]:
     return [
-        PowerCurvePointResponse(wind_speed_ms=float(row.wind_speed_ms), power_kw=float(row.power_kw))
-        for row in curve.itertuples(index=False)
+        PowerCurvePointResponse(
+            wind_speed_ms=float(record["wind_speed_ms"]),
+            power_kw=float(record["power_kw"]),
+        )
+        for record in curve.to_dict(orient="records")
     ]
 
 
@@ -424,7 +469,7 @@ def _serialize_power_curve_record(record: PowerCurve) -> PowerCurveLibraryRespon
         id=record.id,
         name=record.name,
         file_name=record.file_name,
-        summary=PowerCurveSummaryResponse(**(record.summary_json or summarize_power_curve(points))),
+        summary=_serialize_power_curve_summary(record.summary_json or summarize_power_curve(points)),
         points=_serialize_power_curve(points),
         created_at=record.created_at,
         updated_at=record.updated_at,
@@ -666,7 +711,7 @@ async def create_weibull_fit(
         dataset_id=dataset.id,
         column_id=column.id,
         excluded_flag_ids=payload.exclude_flags,
-        fit=WeibullFitResponse(**fit),
+        fit=_serialize_weibull_fit(fit),
         curve_points=[
             WeibullCurvePointResponse(
                 x=float(x_value),
@@ -697,10 +742,7 @@ async def create_shear_analysis(
     loaded = await load_dataset_frame(db, dataset.id, column_ids=column_ids)
     filtered = await filter_flagged_data(db, loaded.frame, dataset.id, loaded.columns_by_id, payload.exclude_flags)
 
-    speeds_by_height = {
-        float(column.height_m): _coerce_numeric_series(filtered, column.name).to_numpy(dtype=float)
-        for column in speed_columns
-    }
+    speeds_by_height = {_column_height(column): _coerce_numeric_series(filtered, column.name).to_numpy(dtype=float) for column in speed_columns}
 
     if len({len(values) for values in speeds_by_height.values()}) != 1:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Speed columns do not align for shear analysis")
@@ -711,7 +753,7 @@ async def create_shear_analysis(
 
     profile = shear_profile(
         speeds_by_height,
-        column_ids_by_height={float(column.height_m): column.id for column in speed_columns},
+        column_ids_by_height={_column_height(column): column.id for column in speed_columns},
         timestamps=[timestamp.to_pydatetime() if hasattr(timestamp, "to_pydatetime") else timestamp for timestamp in filtered.index.to_list()],
         directions=direction_values,
         method=payload.method,
@@ -950,12 +992,12 @@ async def create_extrapolated_series(
     filtered = await filter_flagged_data(db, loaded.frame, dataset.id, loaded.columns_by_id, payload.exclude_flags)
 
     speeds_by_height = {
-        float(column.height_m): pd.to_numeric(filtered[column.name], errors="coerce").to_numpy(dtype=float)
+        _column_height(column): pd.to_numeric(filtered[column.name], errors="coerce").to_numpy(dtype=float)
         for column in speed_columns
     }
     extrapolated = extrapolate_to_height(
         speeds_by_height,
-        column_ids_by_height={float(column.height_m): column.id for column in speed_columns},
+        column_ids_by_height={_column_height(column): column.id for column in speed_columns},
         target_height=payload.target_height,
         method=payload.method,
     )
@@ -999,8 +1041,50 @@ async def create_extrapolated_series(
         if len(rows) != len(values):
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Extrapolated values do not align with dataset rows")
 
+        change_entries: list[dict[str, object]] = []
         for row, value in zip(rows, values, strict=False):
-            row.values_json = {**row.values_json, column_name: None if not np.isfinite(value) else float(value)}
+            stored_value = None if not np.isfinite(value) else float(value)
+            previous_had_key = column_name in row.values_json
+            change_entries.append(
+                {
+                    "timestamp": row.timestamp.isoformat(),
+                    "row_existed": True,
+                    "previous_had_key": previous_had_key,
+                    "previous_value": row.values_json.get(column_name) if previous_had_key else None,
+                    "new_value": stored_value,
+                },
+            )
+            row.values_json = {**row.values_json, column_name: stored_value}
+
+        await record_change(
+            db,
+            dataset.id,
+            action_type=COLUMN_ADDED_ACTION_TYPE,
+            description=f"Created extrapolated wind shear column {column.name} at {payload.target_height:g} m using the {payload.method} method.",
+            before_state={
+                "mode": "timeseries_column_create",
+                "source": "wind_shear_extrapolation",
+                "method": payload.method,
+                "target_height": payload.target_height,
+                "created_column": serialize_column_snapshot(column),
+                "changes": change_entries,
+            },
+            after_state={
+                "mode": "timeseries_column_create",
+                "source": "wind_shear_extrapolation",
+                "method": payload.method,
+                "target_height": payload.target_height,
+                "created_column_id": str(column.id),
+                "created_column_name": column.name,
+                "changes": [
+                    {
+                        "timestamp": entry["timestamp"],
+                        "new_value": entry["new_value"],
+                    }
+                    for entry in change_entries
+                ],
+            },
+        )
 
         await db.commit()
         created_column = ExtrapolatedColumnResponse(
@@ -1045,7 +1129,7 @@ async def upload_power_curve(file: UploadFile = File(...)) -> PowerCurveUploadRe
 
     return PowerCurveUploadResponse(
         file_name=file.filename,
-        summary=PowerCurveSummaryResponse(**summarize_power_curve(curve)),
+        summary=_serialize_power_curve_summary(summarize_power_curve(curve)),
         points=_serialize_power_curve(curve),
     )
 
@@ -1170,7 +1254,7 @@ async def create_energy_estimate(
 
     frame = await get_clean_dataframe(db, dataset.id, column_ids=column_ids, exclude_flag_ids=payload.exclude_flags)
     if frame.empty:
-        power_curve_summary = PowerCurveSummaryResponse(**summarize_power_curve(power_curve))
+        power_curve_summary = _serialize_power_curve_summary(summarize_power_curve(power_curve))
         return EnergyEstimateResponse(
             dataset_id=dataset.id,
             speed_column_id=speed_column.id,
@@ -1219,7 +1303,7 @@ async def create_energy_estimate(
     time_step_hours = float(estimate["time_step_hours"])
     monthly_rows = energy_by_month(timestamps, power_values, time_step_hours=time_step_hours)
     speed_bin_rows = energy_by_speed_bin(speed_values, power_values, time_step_hours=time_step_hours, bin_width=payload.speed_bin_width)
-    power_curve_summary = PowerCurveSummaryResponse(**summarize_power_curve(power_curve))
+    power_curve_summary = _serialize_power_curve_summary(summarize_power_curve(power_curve))
 
     return EnergyEstimateResponse(
         dataset_id=dataset.id,

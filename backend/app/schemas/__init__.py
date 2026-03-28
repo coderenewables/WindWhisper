@@ -81,6 +81,7 @@ from app.schemas.qc import (
 	FlagRuleResponse,
 	ManualFlagRequest,
 )
+from app.schemas.report import ReportColumnSelection, ReportFormat, ReportGenerateRequest, ReportSectionId
 from app.schemas.timeseries import (
 	DatasetColumnResponse,
 	DatasetDetailResponse,
@@ -172,6 +173,10 @@ __all__ = [
 	"ProjectListResponse",
 	"ProjectResponse",
 	"ProjectUpdate",
+	"ReportColumnSelection",
+	"ReportFormat",
+	"ReportGenerateRequest",
+	"ReportSectionId",
 	"TimeSeriesColumnResponse",
 	"TimeSeriesResponse",
 	"UploadPreviewResponse",

@@ -415,6 +415,14 @@ async def test_shear_and_extrapolation_endpoints_return_profiles_and_create_colu
     assert extrapolate_payload["created_column"]["name"] == "Speed_100m_power"
     assert extrapolate_payload["summary"]["count"] == 4
     assert len(extrapolate_payload["values"]) == 4
+    created_column_id = extrapolate_payload["created_column"]["id"]
+
+    history_response = await client.get(f"/api/datasets/{dataset.id}/history")
+    assert history_response.status_code == 200
+    history_payload = history_response.json()
+    assert history_payload["total"] == 1
+    assert history_payload["changes"][0]["action_type"] == "column_added"
+    assert history_payload["changes"][0]["before_state"]["created_column"]["id"] == created_column_id
 
     refreshed_dataset = await db_session.get(Dataset, dataset.id)
     assert refreshed_dataset is not None
@@ -423,6 +431,25 @@ async def test_shear_and_extrapolation_endpoints_return_profiles_and_create_colu
     )
     rows = result.scalars().all()
     assert all("Speed_100m_power" in row.values_json for row in rows)
+
+    undo_response = await client.post(f"/api/datasets/{dataset.id}/undo")
+    assert undo_response.status_code == 200
+    undo_payload = undo_response.json()
+    assert undo_payload["undone_change"]["action_type"] == "column_added"
+
+    dataset_after_undo = await client.get(f"/api/datasets/{dataset.id}")
+    assert dataset_after_undo.status_code == 200
+    assert all(column["id"] != created_column_id for column in dataset_after_undo.json()["columns"])
+
+    result_after_undo = await db_session.execute(
+        select(TimeseriesData).where(TimeseriesData.dataset_id == dataset.id).order_by(TimeseriesData.timestamp.asc())
+    )
+    rows_after_undo = result_after_undo.scalars().all()
+    assert all("Speed_100m_power" not in row.values_json for row in rows_after_undo)
+
+    history_after_undo = await client.get(f"/api/datasets/{dataset.id}/history")
+    assert history_after_undo.status_code == 200
+    assert history_after_undo.json()["total"] == 0
 
 
 async def test_turbulence_endpoint_returns_speed_bins_direction_bins_and_summary(client: AsyncClient, db_session: AsyncSession) -> None:

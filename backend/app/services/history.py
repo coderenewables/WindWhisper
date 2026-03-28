@@ -14,6 +14,7 @@ from app.services.qc_engine import get_dataset_or_404
 RECONSTRUCTION_ACTION_TYPE = "data_reconstructed"
 FLAG_APPLIED_ACTION_TYPE = "flag_applied"
 FLAG_REMOVED_ACTION_TYPE = "flag_removed"
+COLUMN_ADDED_ACTION_TYPE = "column_added"
 
 
 async def record_change(
@@ -187,12 +188,18 @@ async def _delete_flagged_ranges_by_id(db: AsyncSession, snapshots: list[dict]) 
             await db.delete(flagged_range)
 
 
-async def _undo_reconstruction_new_column(db: AsyncSession, dataset_id: uuid.UUID, change: ChangeLog) -> None:
+async def _undo_created_column_change(
+    db: AsyncSession,
+    dataset_id: uuid.UUID,
+    change: ChangeLog,
+    *,
+    error_detail: str,
+) -> None:
     before_state = change.before_state or {}
     created_column = before_state.get("created_column")
     changes = before_state.get("changes")
     if not isinstance(created_column, dict) or not isinstance(changes, list):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Change log does not contain reversible new-column reconstruction state")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=error_detail)
 
     column_id = uuid.UUID(str(created_column["id"]))
     column_name = str(created_column["name"])
@@ -228,6 +235,24 @@ async def _undo_reconstruction_new_column(db: AsyncSession, dataset_id: uuid.UUI
     column = await db.get(DataColumn, column_id)
     if column is not None:
         await db.delete(column)
+
+
+async def _undo_reconstruction_new_column(db: AsyncSession, dataset_id: uuid.UUID, change: ChangeLog) -> None:
+    await _undo_created_column_change(
+        db,
+        dataset_id,
+        change,
+        error_detail="Change log does not contain reversible new-column reconstruction state",
+    )
+
+
+async def _undo_column_added(db: AsyncSession, dataset_id: uuid.UUID, change: ChangeLog) -> None:
+    await _undo_created_column_change(
+        db,
+        dataset_id,
+        change,
+        error_detail="Change log does not contain reversible created-column state",
+    )
 
 
 async def _undo_flag_applied(db: AsyncSession, change: ChangeLog) -> None:
@@ -332,6 +357,8 @@ async def undo_last(db: AsyncSession, dataset_id: uuid.UUID) -> ChangeLog:
         await _undo_flag_applied(db, change)
     elif change.action_type == FLAG_REMOVED_ACTION_TYPE:
         await _undo_flag_removed(db, change)
+    elif change.action_type == COLUMN_ADDED_ACTION_TYPE:
+        await _undo_column_added(db, dataset_id, change)
     else:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Undo is not implemented for action type: {change.action_type}")
 

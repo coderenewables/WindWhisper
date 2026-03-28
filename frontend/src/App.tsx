@@ -1,4 +1,4 @@
-import { BarChart3, DatabaseZap, FileUp, Gauge, LayoutDashboard, LineChart, ShieldCheck, Wind } from "lucide-react";
+import { BarChart3, DatabaseZap, Download, FileUp, Gauge, LayoutDashboard, LineChart, ShieldCheck } from "lucide-react";
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
@@ -33,6 +33,11 @@ const EnergyPage = lazy(async () => {
   return { default: module.EnergyPage };
 });
 
+const ExportPage = lazy(async () => {
+  const module = await import("./pages/ExportPage");
+  return { default: module.ExportPage };
+});
+
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
     <section className="panel-surface flex min-h-[320px] flex-col justify-between p-8">
@@ -46,7 +51,7 @@ function PlaceholderPage({ title, description }: { title: string; description: s
           { icon: FileUp, label: "Import pipeline" },
           { icon: LineChart, label: "Time-series tools" },
           { icon: ShieldCheck, label: "QC workflows" },
-          { icon: Wind, label: "Resource analysis" },
+          { icon: Download, label: "Export deliverables" },
         ].map((item) => (
           <div key={item.label} className="panel-muted flex items-center gap-3 px-4 py-4 text-sm text-ink-700">
             <item.icon className="h-4 w-4 text-teal-500" />
@@ -66,7 +71,7 @@ const appSections = [
   { title: "Analysis", path: "/analysis", icon: BarChart3 },
   { title: "MCP", path: "/mcp", icon: DatabaseZap },
   { title: "Energy", path: "/energy", icon: Gauge },
-  { title: "Export", path: "/export", icon: Wind },
+  { title: "Export", path: "/export", icon: Download },
 ];
 
 function RouteFallback() {
@@ -89,15 +94,7 @@ export default function App() {
         <Route path="analysis" element={<Suspense fallback={<RouteFallback />}><AnalysisPage /></Suspense>} />
         <Route path="mcp" element={<Suspense fallback={<RouteFallback />}><MCPPage /></Suspense>} />
         <Route path="energy" element={<Suspense fallback={<RouteFallback />}><EnergyPage /></Suspense>} />
-        <Route
-          path="export"
-          element={
-            <PlaceholderPage
-              title="Export Workspace"
-              description="Dataset exports and reporting will be connected once the downstream analysis tasks are implemented."
-            />
-          }
-        />
+        <Route path="export" element={<Suspense fallback={<RouteFallback />}><ExportPage /></Suspense>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

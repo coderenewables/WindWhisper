@@ -6,10 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.analysis import router as analysis_router
 from app.api.datasets import router as datasets_router
+from app.api.export import router as export_router
 from app.api.import_engine import router as import_router
 from app.api.mcp import router as mcp_router
 from app.api.projects import router as projects_router
 from app.api.qc import router as qc_router
+from app.api.reports import router as reports_router
 from app.config import settings
 from app.database import SessionLocal, close_database_connections, ping_database
 from app.services.energy_estimate import ensure_seeded_default_power_curve
@@ -59,3 +61,5 @@ app.include_router(import_router)
 app.include_router(qc_router)
 app.include_router(analysis_router)
 app.include_router(mcp_router)
+app.include_router(export_router)
+app.include_router(reports_router)
