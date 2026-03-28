@@ -2,6 +2,7 @@
 FROM node:20-alpine AS builder
 
 WORKDIR /build
+ENV NODE_OPTIONS=--max-old-space-size=4096
 COPY package.json package-lock.json* ./
 RUN npm ci
 COPY . .
