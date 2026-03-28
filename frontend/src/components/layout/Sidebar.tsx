@@ -73,7 +73,7 @@ export function Sidebar({ sections, collapsed, mobileOpen, onToggleCollapse, onT
         <div className="panel-muted mt-6 border-white/10 bg-white/5 p-4 text-white/75">
           <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-teal-300">Status</p>
           <p className="mt-2 text-sm leading-6">
-            Foundation UI is live. Import, analysis, and export workspaces are staged for the next tasks.
+            Import, QC, analysis, export, and workflow workspaces are now available from the main navigation.
           </p>
         </div>
       </div>

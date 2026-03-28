@@ -1,4 +1,4 @@
-import { BarChart3, DatabaseZap, Download, FileUp, Gauge, LayoutDashboard, LineChart, ShieldCheck } from "lucide-react";
+import { BarChart3, DatabaseZap, Download, FileUp, Gauge, GitBranch, LayoutDashboard, LineChart, ShieldCheck } from "lucide-react";
 import { Suspense, lazy } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 
@@ -38,6 +38,11 @@ const ExportPage = lazy(async () => {
   return { default: module.ExportPage };
 });
 
+const WorkflowsPage = lazy(async () => {
+  const module = await import("./pages/WorkflowsPage");
+  return { default: module.WorkflowsPage };
+});
+
 function PlaceholderPage({ title, description }: { title: string; description: string }) {
   return (
     <section className="panel-surface flex min-h-[320px] flex-col justify-between p-8">
@@ -72,6 +77,7 @@ const appSections = [
   { title: "MCP", path: "/mcp", icon: DatabaseZap },
   { title: "Energy", path: "/energy", icon: Gauge },
   { title: "Export", path: "/export", icon: Download },
+  { title: "Workflows", path: "/workflows", icon: GitBranch },
 ];
 
 function RouteFallback() {
@@ -95,6 +101,7 @@ export default function App() {
         <Route path="mcp" element={<Suspense fallback={<RouteFallback />}><MCPPage /></Suspense>} />
         <Route path="energy" element={<Suspense fallback={<RouteFallback />}><EnergyPage /></Suspense>} />
         <Route path="export" element={<Suspense fallback={<RouteFallback />}><ExportPage /></Suspense>} />
+        <Route path="workflows" element={<Suspense fallback={<RouteFallback />}><WorkflowsPage /></Suspense>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

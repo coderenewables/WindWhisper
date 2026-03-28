@@ -13,6 +13,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.dataset import Dataset
+    from app.models.workflow import Workflow
 
 
 class Project(Base):
@@ -42,6 +43,10 @@ class Project(Base):
     )
 
     datasets: Mapped[list["Dataset"]] = relationship(
+        back_populates="project",
+        cascade="all, delete-orphan",
+    )
+    workflows: Mapped[list["Workflow"]] = relationship(
         back_populates="project",
         cascade="all, delete-orphan",
     )

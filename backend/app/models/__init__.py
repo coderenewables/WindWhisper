@@ -7,6 +7,7 @@ from app.models.flag import Flag, FlagRule, FlaggedRange
 from app.models.power_curve import PowerCurve
 from app.models.project import Project
 from app.models.timeseries import TimeseriesData
+from app.models.workflow import Workflow
 
 __all__ = [
 	"AnalysisResult",
@@ -19,5 +20,6 @@ __all__ = [
 	"PowerCurve",
 	"Project",
 	"TimeseriesData",
+	"Workflow",
 ]
 
