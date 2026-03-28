@@ -364,6 +364,64 @@ export interface ScatterResponse {
   points: ScatterPoint[];
 }
 
+export interface ProfileRequest {
+  column_id: string;
+  exclude_flags?: string[];
+  include_yearly_overlays?: boolean;
+  max_years?: number;
+}
+
+export interface DiurnalProfilePoint {
+  hour: number;
+  label: string;
+  mean_value: number | null;
+  std_value: number | null;
+  min_value: number | null;
+  max_value: number | null;
+  sample_count: number;
+}
+
+export interface MonthlyProfilePoint {
+  month: number;
+  label: string;
+  mean_value: number | null;
+  std_value: number | null;
+  min_value: number | null;
+  max_value: number | null;
+  sample_count: number;
+}
+
+export interface MonthlyDiurnalHeatmapCell {
+  month: number;
+  month_label: string;
+  hour: number;
+  hour_label: string;
+  mean_value: number | null;
+  sample_count: number;
+}
+
+export interface DiurnalProfileYear {
+  year: number;
+  points: DiurnalProfilePoint[];
+}
+
+export interface MonthlyProfileYear {
+  year: number;
+  points: MonthlyProfilePoint[];
+}
+
+export interface ProfilesResponse {
+  dataset_id: string;
+  column_id: string;
+  excluded_flag_ids: string[];
+  years_available: number[];
+  diurnal: DiurnalProfilePoint[];
+  monthly: MonthlyProfilePoint[];
+  heatmap: MonthlyDiurnalHeatmapCell[];
+  diurnal_by_year: DiurnalProfileYear[];
+  monthly_by_year: MonthlyProfileYear[];
+}
+
 export interface PowerCurvePoint {
   wind_speed_ms: number;
   power_kw: number;

@@ -16,6 +16,7 @@ const analysisMocks = vi.hoisted(() => ({
   getAirDensityAnalysis: vi.fn(),
   getExtremeWindAnalysis: vi.fn(),
   getScatterAnalysis: vi.fn(),
+  getProfileAnalysis: vi.fn(),
   createExtrapolatedChannel: vi.fn(),
   getWeibullAnalysis: vi.fn(),
 }));
@@ -38,6 +39,7 @@ vi.mock("../api/analysis", () => ({
   getAirDensityAnalysis: analysisMocks.getAirDensityAnalysis,
   getExtremeWindAnalysis: analysisMocks.getExtremeWindAnalysis,
   getScatterAnalysis: analysisMocks.getScatterAnalysis,
+  getProfileAnalysis: analysisMocks.getProfileAnalysis,
   getWeibullAnalysis: analysisMocks.getWeibullAnalysis,
 }));
 
@@ -265,6 +267,17 @@ beforeEach(() => {
       { x: 90, y: 8, color: 10 },
     ],
   });
+  analysisMocks.getProfileAnalysis.mockResolvedValue({
+    dataset_id: "dataset-1",
+    column_id: "spd-1",
+    excluded_flag_ids: [],
+    years_available: [2025],
+    diurnal: Array.from({ length: 24 }, (_, hour) => ({ hour, label: `${String(hour).padStart(2, "0")}:00`, mean_value: hour < 2 ? 7 + hour : null, std_value: hour < 2 ? 0.4 : null, min_value: hour < 2 ? 6.5 + hour : null, max_value: hour < 2 ? 7.5 + hour : null, sample_count: hour < 2 ? 2 : 0 })),
+    monthly: Array.from({ length: 12 }, (_, index) => ({ month: index + 1, label: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][index], mean_value: index === 0 ? 7.4 : null, std_value: index === 0 ? 0.6 : null, min_value: index === 0 ? 6.8 : null, max_value: index === 0 ? 8.1 : null, sample_count: index === 0 ? 4 : 0 })),
+    heatmap: Array.from({ length: 12 * 24 }, (_, index) => ({ month: Math.floor(index / 24) + 1, month_label: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Math.floor(index / 24)], hour: index % 24, hour_label: `${String(index % 24).padStart(2, "0")}:00`, mean_value: index < 2 ? 7 + index : null, sample_count: index < 2 ? 2 : 0 })),
+    diurnal_by_year: [{ year: 2025, points: Array.from({ length: 24 }, (_, hour) => ({ hour, label: `${String(hour).padStart(2, "0")}:00`, mean_value: hour < 2 ? 7 + hour : null, std_value: null, min_value: null, max_value: null, sample_count: hour < 2 ? 2 : 0 })) }],
+    monthly_by_year: [{ year: 2025, points: Array.from({ length: 12 }, (_, index) => ({ month: index + 1, label: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][index], mean_value: index === 0 ? 7.4 : null, std_value: null, min_value: null, max_value: null, sample_count: index === 0 ? 4 : 0 })) }],
+  });
   analysisMocks.createExtrapolatedChannel.mockResolvedValue({
     dataset_id: "dataset-1",
     method: "power",
@@ -451,4 +464,25 @@ test("requests scatter analysis when the scatter tab is opened", async () => {
 
   await screen.findByText(/scatter plot stub/i);
   await screen.findByText(/samples: 24/i);
+});
+
+test("requests profile analysis when the profiles tab is opened", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/wind rose chart stub/i);
+  await user.click(screen.getByRole("button", { name: /profiles/i }));
+
+  await waitFor(() => {
+    expect(analysisMocks.getProfileAnalysis).toHaveBeenCalledWith("dataset-1", {
+      column_id: "spd-1",
+      exclude_flags: [],
+      include_yearly_overlays: true,
+    });
+  });
+
+  await screen.findByText(/daily and monthly profiles for speed 80m/i);
+  await screen.findByText(/samples used/i);
+  await user.click(screen.getByRole("button", { name: /heatmap/i }));
+  await screen.findByRole("heading", { name: /monthly-diurnal heatmap/i });
 });

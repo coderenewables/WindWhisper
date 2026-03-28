@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import math
 import uuid
+from calendar import month_abbr
 from datetime import datetime
 from io import StringIO
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -45,6 +47,13 @@ from app.schemas.analysis import (
     PowerCurveLibraryUpdateRequest,
     PowerCurvePointResponse,
     PowerCurveSummaryResponse,
+    ProfileRequest,
+    ProfilesResponse,
+    DiurnalProfilePointResponse,
+    MonthlyProfilePointResponse,
+    MonthlyDiurnalHeatmapCellResponse,
+    DiurnalProfileYearResponse,
+    MonthlyProfileYearResponse,
     PowerCurveUploadResponse,
     ScatterPointResponse,
     ScatterRequest,
@@ -198,7 +207,7 @@ def _speed_columns_with_heights(dataset_columns: list[DataColumn], requested_ids
         if len(selected) != len(requested_set):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One or more requested speed columns do not belong to this dataset")
 
-    unique_heights = {float(column.height_m) for column in selected}
+    unique_heights = {float(column.height_m) for column in selected if column.height_m is not None}
     if len(unique_heights) < 2:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -211,20 +220,27 @@ def _speed_columns_with_heights(dataset_columns: list[DataColumn], requested_ids
 def _serialize_shear_response(
     dataset_id: uuid.UUID,
     payload: ShearRequest,
-    profile: dict[str, object],
+    profile: dict[str, Any],
 ) -> ShearResponse:
+    target_mean_speed = profile.get("target_mean_speed")
+    representative_pair = cast(dict[str, Any] | None, profile.get("representative_pair"))
+    pair_stats = cast(list[dict[str, Any]], profile.get("pair_stats", []))
+    profile_points = cast(list[dict[str, Any]], profile.get("profile_points", []))
+    direction_bins = cast(list[dict[str, Any]], profile.get("direction_bins", []))
+    time_of_day = cast(list[dict[str, Any]], profile.get("time_of_day", []))
+
     return ShearResponse(
         dataset_id=dataset_id,
         method=payload.method,
         excluded_flag_ids=payload.exclude_flags,
         direction_column_id=payload.direction_column_id,
         target_height=payload.target_height,
-        target_mean_speed=profile.get("target_mean_speed"),
-        representative_pair=ShearPairResponse(**profile["representative_pair"]) if profile.get("representative_pair") else None,
-        pair_stats=[ShearPairResponse(**pair) for pair in profile.get("pair_stats", [])],
-        profile_points=[ShearProfilePointResponse(**point) for point in profile.get("profile_points", [])],
-        direction_bins=[ShearDirectionBinResponse(**sector) for sector in profile.get("direction_bins", [])],
-        time_of_day=[ShearTimeOfDayResponse(**item) for item in profile.get("time_of_day", [])],
+        target_mean_speed=float(target_mean_speed) if target_mean_speed is not None else None,
+        representative_pair=ShearPairResponse(**representative_pair) if representative_pair else None,
+        pair_stats=[ShearPairResponse(**pair) for pair in pair_stats],
+        profile_points=[ShearProfilePointResponse(**point) for point in profile_points],
+        direction_bins=[ShearDirectionBinResponse(**sector) for sector in direction_bins],
+        time_of_day=[ShearTimeOfDayResponse(**item) for item in time_of_day],
     )
 
 
@@ -244,6 +260,126 @@ def _coerce_numeric_array(frame: pd.DataFrame, column_name: str) -> np.ndarray:
     if column_name not in frame.columns:
         return np.array([], dtype=float)
     return pd.to_numeric(frame[column_name], errors="coerce").to_numpy(dtype=float)
+
+
+def _profile_label_for_hour(hour: int) -> str:
+    return f"{hour:02d}:00"
+
+
+def _profile_label_for_month(month: int) -> str:
+    return month_abbr[month]
+
+
+def _build_diurnal_profile_points(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    if frame.empty:
+        return []
+
+    index = pd.DatetimeIndex(frame.index)
+    points: list[dict[str, Any]] = []
+    for hour in range(24):
+        hour_values = frame.loc[index.hour == hour, "value"]
+        sample_count = int(hour_values.count())
+        if sample_count:
+            points.append(
+                {
+                    "hour": hour,
+                    "label": _profile_label_for_hour(hour),
+                    "mean_value": float(hour_values.mean()),
+                    "std_value": None if pd.isna(hour_values.std()) else float(hour_values.std()),
+                    "min_value": float(hour_values.min()),
+                    "max_value": float(hour_values.max()),
+                    "sample_count": sample_count,
+                },
+            )
+        else:
+            points.append(
+                {
+                    "hour": hour,
+                    "label": _profile_label_for_hour(hour),
+                    "mean_value": None,
+                    "std_value": None,
+                    "min_value": None,
+                    "max_value": None,
+                    "sample_count": 0,
+                },
+            )
+    return points
+
+
+def _build_monthly_profile_points(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    if frame.empty:
+        return []
+
+    index = pd.DatetimeIndex(frame.index)
+    points: list[dict[str, Any]] = []
+    for month in range(1, 13):
+        month_values = frame.loc[index.month == month, "value"]
+        sample_count = int(month_values.count())
+        if sample_count:
+            points.append(
+                {
+                    "month": month,
+                    "label": _profile_label_for_month(month),
+                    "mean_value": float(month_values.mean()),
+                    "std_value": None if pd.isna(month_values.std()) else float(month_values.std()),
+                    "min_value": float(month_values.min()),
+                    "max_value": float(month_values.max()),
+                    "sample_count": sample_count,
+                },
+            )
+        else:
+            points.append(
+                {
+                    "month": month,
+                    "label": _profile_label_for_month(month),
+                    "mean_value": None,
+                    "std_value": None,
+                    "min_value": None,
+                    "max_value": None,
+                    "sample_count": 0,
+                },
+            )
+    return points
+
+
+def _build_monthly_diurnal_heatmap(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    if frame.empty:
+        return []
+
+    index = pd.DatetimeIndex(frame.index)
+    cells: list[dict[str, Any]] = []
+    for month in range(1, 13):
+        for hour in range(24):
+            cell_values = frame.loc[(index.month == month) & (index.hour == hour), "value"]
+            sample_count = int(cell_values.count())
+            mean_value = float(cell_values.mean()) if sample_count else None
+            cells.append(
+                {
+                    "month": month,
+                    "month_label": _profile_label_for_month(month),
+                    "hour": hour,
+                    "hour_label": _profile_label_for_hour(hour),
+                    "mean_value": mean_value,
+                    "sample_count": sample_count,
+                },
+            )
+    return cells
+
+
+def _build_yearly_profile_overlays(frame: pd.DataFrame, max_years: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[int]]:
+    if frame.empty:
+        return [], [], []
+
+    index = pd.DatetimeIndex(frame.index)
+    years = sorted(int(year) for year in index.year.unique())
+    selected_years = years[-max_years:]
+    diurnal_by_year: list[dict[str, Any]] = []
+    monthly_by_year: list[dict[str, Any]] = []
+    for year in selected_years:
+        year_frame = frame.loc[index.year == year]
+        diurnal_by_year.append({"year": year, "points": _build_diurnal_profile_points(year_frame)})
+        monthly_by_year.append({"year": year, "points": _build_monthly_profile_points(year_frame)})
+    return diurnal_by_year, monthly_by_year, years
 
 
 def _build_scatter_frame(frame: pd.DataFrame, x_name: str, y_name: str, color_name: str | None) -> pd.DataFrame:
@@ -1103,4 +1239,48 @@ async def create_energy_estimate(
         ),
         monthly=[EnergyEstimateMonthlyResponse(**row) for row in monthly_rows],
         speed_bins=[EnergyEstimateSpeedBinResponse(**row) for row in speed_bin_rows],
+    )
+
+
+@router.post("/profiles/{dataset_id}", response_model=ProfilesResponse)
+async def create_profile_analysis(
+    dataset_id: uuid.UUID,
+    payload: ProfileRequest,
+    db: AsyncSession = Depends(get_db),
+) -> ProfilesResponse:
+    dataset = await get_dataset_or_404(db, dataset_id)
+    column = _resolve_column(dataset.columns, payload.column_id, "column_id")
+
+    frame = await get_clean_dataframe(db, dataset.id, column_ids=[column.id], exclude_flag_ids=payload.exclude_flags)
+    value_frame = pd.DataFrame(index=frame.index)
+    value_frame["value"] = pd.to_numeric(frame[column.name], errors="coerce") if not frame.empty else pd.Series(dtype=float)
+    value_frame = value_frame.dropna(subset=["value"])
+
+    if value_frame.empty:
+        return ProfilesResponse(
+            dataset_id=dataset.id,
+            column_id=column.id,
+            excluded_flag_ids=payload.exclude_flags,
+        )
+
+    diurnal = _build_diurnal_profile_points(value_frame)
+    monthly = _build_monthly_profile_points(value_frame)
+    heatmap = _build_monthly_diurnal_heatmap(value_frame)
+    diurnal_by_year: list[dict[str, Any]] = []
+    monthly_by_year: list[dict[str, Any]] = []
+    years_available: list[int] = sorted(int(year) for year in pd.DatetimeIndex(value_frame.index).year.unique())
+
+    if payload.include_yearly_overlays:
+        diurnal_by_year, monthly_by_year, years_available = _build_yearly_profile_overlays(value_frame, payload.max_years)
+
+    return ProfilesResponse(
+        dataset_id=dataset.id,
+        column_id=column.id,
+        excluded_flag_ids=payload.exclude_flags,
+        years_available=years_available,
+        diurnal=[DiurnalProfilePointResponse(**row) for row in diurnal],
+        monthly=[MonthlyProfilePointResponse(**row) for row in monthly],
+        heatmap=[MonthlyDiurnalHeatmapCellResponse(**row) for row in heatmap],
+        diurnal_by_year=[DiurnalProfileYearResponse(**row) for row in diurnal_by_year],
+        monthly_by_year=[MonthlyProfileYearResponse(**row) for row in monthly_by_year],
     )

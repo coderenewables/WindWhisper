@@ -439,6 +439,47 @@ function buildScatterResponse(payload: Record<string, unknown>) {
   };
 }
 
+function buildProfilesResponse(payload: Record<string, unknown>) {
+  const visibleRows = getVisibleRows(Array.isArray(payload.exclude_flags) ? (payload.exclude_flags as string[]) : []);
+  const values = visibleRows.map((row) => row.speed);
+  const meanValue = values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+
+  return {
+    dataset_id: seededDatasetSummary.id,
+    column_id: String(payload.column_id),
+    excluded_flag_ids: Array.isArray(payload.exclude_flags) ? payload.exclude_flags : [],
+    years_available: [2025],
+    diurnal: Array.from({ length: 24 }, (_, hour) => ({
+      hour,
+      label: `${String(hour).padStart(2, "0")}:00`,
+      mean_value: hour === 0 ? meanValue : null,
+      std_value: hour === 0 ? 1.71 : null,
+      min_value: hour === 0 ? Math.min(...values) : null,
+      max_value: hour === 0 ? Math.max(...values) : null,
+      sample_count: hour === 0 ? values.length : 0,
+    })),
+    monthly: Array.from({ length: 12 }, (_, index) => ({
+      month: index + 1,
+      label: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][index],
+      mean_value: index === 2 ? meanValue : null,
+      std_value: index === 2 ? 1.71 : null,
+      min_value: index === 2 ? Math.min(...values) : null,
+      max_value: index === 2 ? Math.max(...values) : null,
+      sample_count: index === 2 ? values.length : 0,
+    })),
+    heatmap: Array.from({ length: 12 * 24 }, (_, index) => ({
+      month: Math.floor(index / 24) + 1,
+      month_label: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Math.floor(index / 24)],
+      hour: index % 24,
+      hour_label: `${String(index % 24).padStart(2, "0")}:00`,
+      mean_value: index % 24 === 0 && Math.floor(index / 24) === 2 ? meanValue : null,
+      sample_count: index % 24 === 0 && Math.floor(index / 24) === 2 ? values.length : 0,
+    })),
+    diurnal_by_year: [{ year: 2025, points: Array.from({ length: 24 }, (_, hour) => ({ hour, label: `${String(hour).padStart(2, "0")}:00`, mean_value: hour === 0 ? meanValue : null, std_value: null, min_value: null, max_value: null, sample_count: hour === 0 ? values.length : 0 })) }],
+    monthly_by_year: [{ year: 2025, points: Array.from({ length: 12 }, (_, index) => ({ month: index + 1, label: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][index], mean_value: index === 2 ? meanValue : null, std_value: null, min_value: null, max_value: null, sample_count: index === 2 ? values.length : 0 })) }],
+  };
+}
+
 function renderPage() {
   return render(
     <MemoryRouter initialEntries={[`/analysis?projectId=${seededProject.id}&datasetId=${seededDatasetSummary.id}`]}>
@@ -500,6 +541,9 @@ beforeEach(() => {
     }
     if (url === `/analysis/scatter/${seededDatasetSummary.id}`) {
       return makeResponse(buildScatterResponse(payload as Record<string, unknown>));
+    }
+    if (url === `/analysis/profiles/${seededDatasetSummary.id}`) {
+      return makeResponse(buildProfilesResponse(payload as Record<string, unknown>));
     }
     if (url === `/analysis/extrapolate/${seededDatasetSummary.id}`) {
       return makeResponse({
@@ -694,4 +738,26 @@ test("renders extreme wind analysis using seeded backend data", async () => {
       exclude_flags: [],
     });
   });
+});
+
+test("renders profile plots using seeded backend data", async () => {
+  const user = userEvent.setup();
+  renderPage();
+
+  await screen.findByText(/samples used/i);
+  await user.click(screen.getByRole("button", { name: /profiles/i }));
+
+  await screen.findByText(/daily and monthly profiles for speed 80m/i);
+  await screen.findByText(/diurnal profile/i);
+
+  await waitFor(() => {
+    expect(apiClient.post).toHaveBeenCalledWith(`/analysis/profiles/${seededDatasetSummary.id}`, {
+      column_id: "spd-80m",
+      exclude_flags: [],
+      include_yearly_overlays: true,
+    });
+  });
+
+  await user.click(screen.getByRole("button", { name: /heatmap/i }));
+  await screen.findByRole("heading", { name: /monthly-diurnal heatmap/i });
 });

@@ -14,6 +14,7 @@ DEFAULT_TURBULENCE_BIN_WIDTH = 1.0
 DEFAULT_EXTREME_WIND_RETURN_PERIODS = [10.0, 20.0, 50.0, 100.0]
 DEFAULT_ENERGY_SPEED_BIN_WIDTH = 1.0
 DEFAULT_SCATTER_MAX_POINTS = 10000
+DEFAULT_PROFILE_MAX_YEARS = 12
 WeibullMethod = Literal["mle", "moments"]
 ShearMethod = Literal["power", "log"]
 AirDensityPressureSource = Literal["auto", "measured", "estimated"]
@@ -396,6 +397,57 @@ class ScatterResponse(BaseModel):
     sample_count: int = 0
     is_downsampled: bool = False
     points: list[ScatterPointResponse] = Field(default_factory=list)
+
+class ProfileRequest(BaseModel):
+    column_id: uuid.UUID
+    exclude_flags: list[uuid.UUID] = Field(default_factory=list)
+    include_yearly_overlays: bool = True
+    max_years: Annotated[int, Field(default=DEFAULT_PROFILE_MAX_YEARS, ge=1, le=24)] = DEFAULT_PROFILE_MAX_YEARS
+
+class DiurnalProfilePointResponse(BaseModel):
+    hour: int
+    label: str
+    mean_value: float | None = None
+    std_value: float | None = None
+    min_value: float | None = None
+    max_value: float | None = None
+    sample_count: int = 0
+
+class MonthlyProfilePointResponse(BaseModel):
+    month: int
+    label: str
+    mean_value: float | None = None
+    std_value: float | None = None
+    min_value: float | None = None
+    max_value: float | None = None
+    sample_count: int = 0
+
+class MonthlyDiurnalHeatmapCellResponse(BaseModel):
+    month: int
+    month_label: str
+    hour: int
+    hour_label: str
+    mean_value: float | None = None
+    sample_count: int = 0
+
+class DiurnalProfileYearResponse(BaseModel):
+    year: int
+    points: list[DiurnalProfilePointResponse] = Field(default_factory=list)
+
+class MonthlyProfileYearResponse(BaseModel):
+    year: int
+    points: list[MonthlyProfilePointResponse] = Field(default_factory=list)
+
+class ProfilesResponse(BaseModel):
+    dataset_id: uuid.UUID
+    column_id: uuid.UUID
+    excluded_flag_ids: list[uuid.UUID] = Field(default_factory=list)
+    years_available: list[int] = Field(default_factory=list)
+    diurnal: list[DiurnalProfilePointResponse] = Field(default_factory=list)
+    monthly: list[MonthlyProfilePointResponse] = Field(default_factory=list)
+    heatmap: list[MonthlyDiurnalHeatmapCellResponse] = Field(default_factory=list)
+    diurnal_by_year: list[DiurnalProfileYearResponse] = Field(default_factory=list)
+    monthly_by_year: list[MonthlyProfileYearResponse] = Field(default_factory=list)
 
 
 class ExtrapolateRequest(BaseModel):

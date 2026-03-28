@@ -2,10 +2,11 @@ import { AlertTriangle, BarChart3, Compass, GaugeCircle, ShieldCheck, Wind } fro
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-import { createExtrapolatedChannel, getAirDensityAnalysis, getExtremeWindAnalysis, getHistogramAnalysis, getScatterAnalysis, getShearAnalysis, getTurbulenceAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
+import { createExtrapolatedChannel, getAirDensityAnalysis, getExtremeWindAnalysis, getHistogramAnalysis, getProfileAnalysis, getScatterAnalysis, getShearAnalysis, getTurbulenceAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
 import { AirDensityPanel } from "../components/analysis/AirDensityPanel";
 import { ExtremeWindPanel } from "../components/analysis/ExtremeWindPanel";
 import { FrequencyHistogram } from "../components/analysis/FrequencyHistogram";
+import { ProfilePlots } from "../components/analysis/ProfilePlots";
 import { TurbulencePanel } from "../components/analysis/TurbulencePanel";
 import { WindShearPanel } from "../components/analysis/WindShearPanel";
 import { getDataset, listProjectDatasets } from "../api/datasets";
@@ -13,11 +14,11 @@ import { listFlags } from "../api/qc";
 import { WindRoseChart } from "../components/analysis/WindRoseChart";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
 import { useProjectStore } from "../stores/projectStore";
-import type { AirDensityPressureSource, AirDensityResponse, ExtremeWindResponse, HistogramRequest, HistogramResponse, ScatterResponse, ShearMethod, ShearResponse, TurbulenceResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
+import type { AirDensityPressureSource, AirDensityResponse, ExtremeWindResponse, HistogramRequest, HistogramResponse, ProfilesResponse, ScatterResponse, ShearMethod, ShearResponse, TurbulenceResponse, WeibullMethod, WeibullResponse, WindRoseResponse } from "../types/analysis";
 import type { DatasetColumn, DatasetDetail, DatasetSummary } from "../types/dataset";
 import type { Flag } from "../types/qc";
 
-type AnalysisTab = "wind-rose" | "histogram" | "shear" | "turbulence" | "air-density" | "extreme-wind" | "scatter";
+type AnalysisTab = "wind-rose" | "histogram" | "shear" | "turbulence" | "air-density" | "extreme-wind" | "scatter" | "profiles";
 
 const analysisTabs: Array<{ id: AnalysisTab; label: string; description: string }> = [
   { id: "wind-rose", label: "Wind Rose", description: "Directional frequency, mean speed, and energy." },
@@ -27,6 +28,7 @@ const analysisTabs: Array<{ id: AnalysisTab; label: string; description: string 
   { id: "air-density", label: "Air Density", description: "Density and wind power density from measured or estimated pressure." },
   { id: "extreme-wind", label: "Extreme Wind", description: "Annual maxima, Gumbel fit, and long-return wind speeds." },
   { id: "scatter", label: "Scatter", description: "Cross-channel scatterplots, density mode, regression fit, and polar diagnostics." },
+  { id: "profiles", label: "Profiles", description: "Diurnal, monthly, and monthly-diurnal profile plots for the selected channel." },
 ];
 
 const ScatterPlot = lazy(async () => {
@@ -83,6 +85,7 @@ export function AnalysisPage() {
   const [airDensityData, setAirDensityData] = useState<AirDensityResponse | null>(null);
   const [extremeWindData, setExtremeWindData] = useState<ExtremeWindResponse | null>(null);
   const [scatterData, setScatterData] = useState<ScatterResponse | null>(null);
+  const [profileData, setProfileData] = useState<ProfilesResponse | null>(null);
   const [weibullData, setWeibullData] = useState<WeibullResponse | null>(null);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
   const [isLoadingDatasetDetail, setIsLoadingDatasetDetail] = useState(false);
@@ -94,6 +97,7 @@ export function AnalysisPage() {
   const [isLoadingAirDensity, setIsLoadingAirDensity] = useState(false);
   const [isLoadingExtremeWind, setIsLoadingExtremeWind] = useState(false);
   const [isLoadingScatter, setIsLoadingScatter] = useState(false);
+  const [isLoadingProfiles, setIsLoadingProfiles] = useState(false);
   const [isLoadingWeibull, setIsLoadingWeibull] = useState(false);
   const [isCreatingExtrapolatedChannel, setIsCreatingExtrapolatedChannel] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
@@ -104,6 +108,7 @@ export function AnalysisPage() {
   const [airDensityError, setAirDensityError] = useState<string | null>(null);
   const [extremeWindError, setExtremeWindError] = useState<string | null>(null);
   const [scatterError, setScatterError] = useState<string | null>(null);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const [weibullError, setWeibullError] = useState<string | null>(null);
   const [createChannelError, setCreateChannelError] = useState<string | null>(null);
   const [createdChannelName, setCreatedChannelName] = useState<string | null>(null);
@@ -124,6 +129,7 @@ export function AnalysisPage() {
   const [selectedScatterXColumnId, setSelectedScatterXColumnId] = useState("");
   const [selectedScatterYColumnId, setSelectedScatterYColumnId] = useState("");
   const [selectedScatterColorColumnId, setSelectedScatterColorColumnId] = useState("");
+  const [selectedProfileColumnId, setSelectedProfileColumnId] = useState("");
   const [airPressureSource, setAirPressureSource] = useState<AirDensityPressureSource>("auto");
   const [airElevation, setAirElevation] = useState("");
   const { projects, fetchProjects } = useProjectStore();
@@ -192,6 +198,7 @@ export function AnalysisPage() {
       setSelectedScatterXColumnId("");
       setSelectedScatterYColumnId("");
       setSelectedScatterColorColumnId("");
+      setSelectedProfileColumnId("");
       setAirElevation("");
       setRoseData(null);
       setHistogramData(null);
@@ -200,6 +207,7 @@ export function AnalysisPage() {
       setAirDensityData(null);
       setExtremeWindData(null);
       setScatterData(null);
+      setProfileData(null);
       setWeibullData(null);
       return;
     }
@@ -235,6 +243,7 @@ export function AnalysisPage() {
         setSelectedScatterXColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultDirectionColumn(response.columns) || getDefaultValueColumn(response.columns)));
         setSelectedScatterYColumnId((current) => (isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "speed")?.id ?? getDefaultValueColumn(response.columns)));
         setSelectedScatterColorColumnId((current) => (current && isValidColumn(response.columns, current) ? current : response.columns.find((column) => column.measurement_type === "temperature")?.id ?? ""));
+        setSelectedProfileColumnId((current) => (isValidColumn(response.columns, current) ? current : getDefaultValueColumn(response.columns)));
       })
       .catch((error: unknown) => {
         if (!cancelled) {
@@ -292,7 +301,12 @@ export function AnalysisPage() {
     () => datasetDetail?.columns.find((column) => column.id === selectedScatterColorColumnId) ?? null,
     [datasetDetail, selectedScatterColorColumnId],
   );
+  const selectedProfileColumn = useMemo(
+    () => datasetDetail?.columns.find((column) => column.id === selectedProfileColumnId) ?? null,
+    [datasetDetail, selectedProfileColumnId],
+  );
   const histogramColumnLabel = selectedHistogramColumn?.name ?? "selected channel";
+  const profileColumnLabel = selectedProfileColumn?.name ?? "selected channel";
   const isWeibullAvailable = selectedHistogramColumn?.measurement_type === "speed";
   const histogramRequest = useMemo<HistogramRequest | null>(() => {
     if (!selectedHistogramColumnId) {
@@ -585,6 +599,40 @@ export function AnalysisPage() {
       cancelled = true;
     };
   }, [activeTab, datasetId, excludedFlagIds, selectedScatterColorColumnId, selectedScatterXColumnId, selectedScatterYColumnId]);
+
+  useEffect(() => {
+    if (activeTab !== "profiles" || !datasetId || !selectedProfileColumnId) {
+      setProfileError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingProfiles(true);
+    setProfileError(null);
+
+    void getProfileAnalysis(datasetId, {
+      column_id: selectedProfileColumnId,
+      exclude_flags: excludedFlagIds,
+      include_yearly_overlays: true,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setProfileData(response);
+          setIsLoadingProfiles(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setProfileData(null);
+          setProfileError(error instanceof Error ? error.message : "Unable to build profile plots");
+          setIsLoadingProfiles(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, datasetId, excludedFlagIds, selectedProfileColumnId]);
 
   useEffect(() => {
     if (activeTab !== "histogram" || !datasetId || !histogramRequest) {
@@ -1405,6 +1453,67 @@ export function AnalysisPage() {
                       colorColumn={selectedScatterColorColumn}
                     />
                   </Suspense>
+                )}
+              </div>
+            </section>
+          ) : activeTab === "profiles" ? (
+            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
+              <aside className="space-y-4">
+                <section className="panel-surface p-5">
+                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
+                  <div className="mt-4 space-y-4">
+                    <label className="grid gap-2 text-sm font-medium text-ink-800">
+                      Profile column
+                      <select value={selectedProfileColumnId} onChange={(event) => setSelectedProfileColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={valueColumns.length === 0}>
+                        <option value="">Select a column</option>
+                        {valueColumns.map((column) => (
+                          <option key={column.id} value={column.id}>
+                            {column.name}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <div className="rounded-2xl border border-ink-100 bg-white/80 px-4 py-4 text-sm text-ink-700">
+                      <div className="font-semibold text-ink-900">Profile outputs</div>
+                      <div className="mt-3 space-y-2 text-ink-600">
+                        <div>Diurnal mean with standard-deviation shading</div>
+                        <div>Monthly mean bars with error bars</div>
+                        <div>Monthly-diurnal heatmap and yearly overlays when multiple years are available</div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="panel-surface p-5">
+                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
+                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
+                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
+                  {!isLoadingFlags && flags.length > 0 ? (
+                    <div className="mt-4 space-y-3">
+                      {flags.map((flag) => {
+                        const excluded = excludedFlagIds.includes(flag.id);
+                        return (
+                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
+                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
+                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
+                            <span className="flex-1 text-sm text-ink-700">
+                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
+                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </section>
+              </aside>
+
+              <div className="space-y-4">
+                {!selectedProfileColumnId ? (
+                  <section className="panel-surface p-8 text-sm text-ink-600">Select a column to inspect its diurnal, monthly, and seasonal-hourly profile.</section>
+                ) : (
+                  <ProfilePlots data={profileData} isLoading={isLoadingProfiles} error={profileError} columnLabel={profileColumnLabel} />
                 )}
               </div>
             </section>

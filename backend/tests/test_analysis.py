@@ -141,6 +141,100 @@ async def test_histogram_endpoint_returns_bins_and_stats(client: AsyncClient, db
     assert len(payload["bins"]) == 4
     assert [bin_entry["count"] for bin_entry in payload["bins"]] == [1, 0, 1, 1]
 
+
+async def test_profiles_endpoint_returns_diurnal_monthly_heatmap_and_yearly_overlays(client: AsyncClient, db_session: AsyncSession) -> None:
+    project = Project(name="Profiles Site")
+    db_session.add(project)
+    await db_session.flush()
+
+    start_time = datetime(2024, 1, 15, 0, 0, tzinfo=UTC)
+    dataset = Dataset(
+        project_id=project.id,
+        name="Profiles Mast",
+        source_type="mast",
+        time_step_seconds=3600,
+        start_time=start_time,
+        end_time=datetime(2025, 2, 15, 23, 0, tzinfo=UTC),
+    )
+    db_session.add(dataset)
+    await db_session.flush()
+
+    speed_column = DataColumn(dataset_id=dataset.id, name="Speed_80m", measurement_type="speed", height_m=80)
+    db_session.add(speed_column)
+    await db_session.flush()
+
+    rows: list[TimeseriesData] = []
+    timestamps = [
+        datetime(2024, 1, 15, 0, 0, tzinfo=UTC),
+        datetime(2024, 1, 15, 12, 0, tzinfo=UTC),
+        datetime(2024, 2, 15, 0, 0, tzinfo=UTC),
+        datetime(2024, 2, 15, 12, 0, tzinfo=UTC),
+        datetime(2025, 1, 15, 0, 0, tzinfo=UTC),
+        datetime(2025, 1, 15, 12, 0, tzinfo=UTC),
+        datetime(2025, 2, 15, 0, 0, tzinfo=UTC),
+        datetime(2025, 2, 15, 12, 0, tzinfo=UTC),
+    ]
+    values = [6.0, 8.0, 7.0, 9.0, 10.0, 12.0, 11.0, 13.0]
+    rows.extend(
+        TimeseriesData(dataset_id=dataset.id, timestamp=timestamp, values_json={"Speed_80m": value})
+        for timestamp, value in zip(timestamps, values, strict=False)
+    )
+    db_session.add_all(rows)
+    await db_session.commit()
+
+    response = await client.post(
+        f"/api/analysis/profiles/{dataset.id}",
+        json={
+            "column_id": str(speed_column.id),
+            "include_yearly_overlays": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["dataset_id"] == str(dataset.id)
+    assert payload["column_id"] == str(speed_column.id)
+    assert payload["years_available"] == [2024, 2025]
+    assert len(payload["diurnal"]) == 24
+    assert len(payload["monthly"]) == 12
+    assert len(payload["heatmap"]) == 288
+    assert len(payload["diurnal_by_year"]) == 2
+    assert len(payload["monthly_by_year"]) == 2
+
+    midnight = next(point for point in payload["diurnal"] if point["hour"] == 0)
+    noon = next(point for point in payload["diurnal"] if point["hour"] == 12)
+    january = next(point for point in payload["monthly"] if point["month"] == 1)
+    february = next(point for point in payload["monthly"] if point["month"] == 2)
+    jan_midnight = next(cell for cell in payload["heatmap"] if cell["month"] == 1 and cell["hour"] == 0)
+
+    assert midnight["sample_count"] == 4
+    assert midnight["mean_value"] == 8.5
+    assert noon["sample_count"] == 4
+    assert noon["mean_value"] == 10.5
+    assert january["sample_count"] == 4
+    assert january["mean_value"] == 9.0
+    assert february["sample_count"] == 4
+    assert february["mean_value"] == 10.0
+    assert jan_midnight["mean_value"] == 8.0
+
+
+async def test_profiles_endpoint_respects_flag_exclusions(client: AsyncClient, db_session: AsyncSession) -> None:
+    dataset, _, speed_column, exclusion_flag = await _seed_analysis_dataset(db_session)
+
+    response = await client.post(
+        f"/api/analysis/profiles/{dataset.id}",
+        json={
+            "column_id": str(speed_column.id),
+            "exclude_flags": [str(exclusion_flag.id)],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    south_hour = next(point for point in payload["diurnal"] if point["hour"] == 0)
+    assert south_hour["sample_count"] == 3
+    assert round(south_hour["mean_value"], 2) == 6.67
+
 async def test_scatter_endpoint_returns_paired_points_and_applies_flag_exclusions(client: AsyncClient, db_session: AsyncSession) -> None:
     dataset, direction_column, speed_column, exclusion_flag = await _seed_analysis_dataset(db_session)
 
