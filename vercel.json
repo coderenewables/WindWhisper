@@ -6,7 +6,7 @@
   "functions": {
     "api/[...route].py": {
       "maxDuration": 60,
-      "includeFiles": ["backend/**", "data/**"]
+      "includeFiles": "{backend/**,data/**}"
     }
   },
   "rewrites": [
