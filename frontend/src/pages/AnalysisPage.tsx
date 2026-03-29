@@ -777,17 +777,16 @@ export function AnalysisPage() {
       <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.95fr)] xl:items-end">
           <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Tasks 14-20</span>
-            <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Explore directional behaviour, distributions, shear, turbulence, density, and extreme wind inside a QC-aware analysis workspace.
+            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
+              Analysis: wind rose, distributions, shear, turbulence, density, and extremes.
             </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
-              Choose a dataset, then move between wind roses, distributions, shear, IEC turbulence, density, and return-period views without leaving the same cleaned-data context.
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
+              Select a dataset and explore directional and statistical analyses using cleaned data.
             </p>
           </div>
 
-          <div className="panel-muted grid gap-4 p-5 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
+          <div className="panel-muted grid gap-3 p-3 sm:grid-cols-2 text-sm">
+            <label className="grid gap-1 text-xs font-medium text-ink-800">
               Project
               <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-2xl border-ink-200 bg-white">
                 <option value="">Select a project</option>
@@ -799,7 +798,7 @@ export function AnalysisPage() {
               </select>
             </label>
 
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
+            <label className="grid gap-1 text-xs font-medium text-ink-800">
               Dataset
               <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-2xl border-ink-200 bg-white" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
                 <option value="">Select a dataset</option>

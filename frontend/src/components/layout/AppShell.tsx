@@ -38,10 +38,16 @@ export function AppShell({ sections }: AppShellProps) {
       <div
         className={[
           "min-h-screen px-4 pb-8 pt-20 transition-[padding] duration-300 sm:px-6 lg:px-8 lg:pt-4",
-          sidebarCollapsed ? "lg:pl-[136px]" : "lg:pl-[272px]",
+          sidebarCollapsed ? "lg:pl-[152px]" : "lg:pl-[272px]",
         ].join(" ")}
       >
-        <TopBar darkMode={darkMode} onToggleDarkMode={() => setDarkMode((current) => !current)} />
+        <TopBar
+          darkMode={darkMode}
+          sidebarCollapsed={sidebarCollapsed}
+          onToggleDarkMode={() => setDarkMode((current) => !current)}
+          onToggleSidebar={() => setSidebarCollapsed((current) => !current)}
+          onToggleMobileNavigation={() => setMobileOpen((current) => !current)}
+        />
         <main>
           <Outlet />
         </main>

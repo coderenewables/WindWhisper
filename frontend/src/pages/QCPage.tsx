@@ -262,6 +262,7 @@ export function QCPage() {
     excludedFlagIds: [],
     reloadKey: timeseriesReloadKey,
   });
+  const renderedPointCount = data?.timestamps.length ?? 0;
 
   async function handleReconstructionSaved(response: ReconstructionResponse) {
     if (!datasetDetail) {
@@ -318,16 +319,15 @@ export function QCPage() {
       <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,0.9fr)] xl:items-end">
           <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Task 11</span>
-            <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Review QC flags, define automated rules, and mark suspect intervals directly on the time-series chart.
+            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
+              QC: review flags, define rules, and mark suspect intervals.
             </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
-              This workspace pairs the QC rule editor with the interactive chart so you can inspect flagged intervals, apply rules, and manually exclude ranges.
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
+              Use the editor and chart to inspect flagged intervals and apply exclusions.
             </p>
           </div>
-          <div className="panel-muted grid gap-4 p-5 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
+          <div className="panel-muted grid gap-3 p-3 sm:grid-cols-2 text-sm">
+            <label className="grid gap-1 text-xs font-medium text-ink-800">
               Project
               <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-2xl border-ink-200 bg-white">
                 <option value="">Select a project</option>
@@ -336,7 +336,7 @@ export function QCPage() {
                 ))}
               </select>
             </label>
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
+            <label className="grid gap-1 text-xs font-medium text-ink-800">
               Dataset
               <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-2xl border-ink-200 bg-white" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
                 <option value="">Select a dataset</option>
@@ -386,7 +386,7 @@ export function QCPage() {
             </div>
             <div className="panel-muted px-4 py-4">
               <div className="text-sm font-medium text-ink-700">Rendered points</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{data?.timestamps.length.toLocaleString() ?? "0"}</p>
+              <p className="mt-3 text-xl font-semibold text-ink-900">{renderedPointCount.toLocaleString()}</p>
               <p className="mt-1 text-sm leading-7 text-ink-600">Visible chart points for the current time window.</p>
             </div>
           </section>

@@ -114,18 +114,16 @@ export function ImportPage() {
       <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)] xl:items-end">
           <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Task 8</span>
-            <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Upload, map, and confirm a raw measurement file into a project workspace.
+            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
+              Import: upload and map raw measurement files.
             </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
-              This wizard pushes files through the existing backend import engine, gives you one pass to correct channel
-              mapping, and then persists the dataset into the selected project.
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
+              Upload files, confirm channel mapping, and save datasets to a project.
             </p>
           </div>
 
-          <div className="panel-muted p-5">
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
+          <div className="panel-muted p-3 text-sm">
+            <label className="grid gap-1 text-xs font-medium text-ink-800">
               Target project
               <div className="relative">
                 <select

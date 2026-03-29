@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { AlertTriangle, Plus, Sparkles } from "lucide-react";
+import { AlertTriangle, MapPinned, Plus, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -26,6 +26,7 @@ export function DashboardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingKml, setIsDownloadingKml] = useState(false);
   const { projects, total, error, isLoadingProjects, isSubmitting, fetchProjects, createProject, clearError } = useProjectStore();
+  const projectsWithCoordinates = projects.filter((project) => project.latitude !== null && project.longitude !== null).length;
 
   const form = useForm<ProjectFormInput, unknown, ProjectFormValues>({
     resolver: zodResolver(projectFormSchema),
@@ -81,41 +82,36 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.4fr)_minmax(300px,0.8fr)] xl:items-end">
-          <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Foundation UI</span>
-            <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Organize measurement campaigns before import, QC, and energy analysis.
-            </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
-              GoKaatru starts with project workspaces. Each project will anchor raw logger imports, derived data sets,
-              flagging rules, and downstream resource analysis.
+      <section className="panel-surface overflow-hidden px-6 py-6 sm:px-8 sm:py-7">
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+          <div className="max-w-3xl">
+            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Dashboard</span>
+            <h1 className="mt-3 text-3xl font-semibold leading-tight text-ink-900 sm:text-4xl">Project workspaces</h1>
+            <p className="mt-3 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
+              Keep site setup, imports, QC, and downstream analysis anchored to a clean project list.
             </p>
           </div>
 
-          <div className="panel-muted grid gap-4 p-5 sm:grid-cols-3 xl:grid-cols-1">
-            <div>
+          <div className="flex flex-col gap-3 sm:flex-row xl:min-w-[420px] xl:justify-end">
+            <div className="panel-muted min-w-[160px] px-4 py-4">
               <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Projects</p>
               <p className="mt-2 text-3xl font-semibold text-ink-900">{total}</p>
             </div>
-            <div>
-              <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">API</p>
-              <p className="mt-2 text-sm leading-6 text-ink-600">Live data is being loaded from the FastAPI project endpoints.</p>
+            <div className="panel-muted min-w-[160px] px-4 py-4">
+              <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Mapped sites</p>
+              <p className="mt-2 text-3xl font-semibold text-ink-900">{projectsWithCoordinates}</p>
             </div>
-            <div>
-              <button
-                type="button"
-                onClick={() => {
-                  clearError();
-                  setIsModalOpen(true);
-                }}
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-ink-900 px-5 py-3 text-sm font-medium text-white transition hover:bg-ink-700"
-              >
-                <Plus className="h-4 w-4" />
-                New project
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                clearError();
+                setIsModalOpen(true);
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-ink-900 px-5 py-4 text-sm font-medium text-white transition hover:bg-ink-700"
+            >
+              <Plus className="h-4 w-4" />
+              New project
+            </button>
           </div>
         </div>
       </section>
@@ -139,13 +135,13 @@ export function DashboardPage() {
             <div className="panel-surface p-8">
               <Sparkles className="h-5 w-5 text-ember-500" />
               <h2 className="mt-4 text-2xl font-semibold text-ink-900">Create your first campaign workspace</h2>
-              <p className="mt-3 max-w-xl text-sm leading-7 text-ink-600">
-                Add a project to begin importing met tower, NRG, Campbell, or spreadsheet data into a named analysis
-                workspace.
-              </p>
+              <p className="mt-3 max-w-xl text-sm leading-7 text-ink-600">Add a project, then bring in logger or spreadsheet data when you are ready.</p>
               <button
                 type="button"
-                onClick={() => setIsModalOpen(true)}
+                onClick={() => {
+                  clearError();
+                  setIsModalOpen(true);
+                }}
                 className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-ember-500 px-5 py-3 text-sm font-medium text-white transition hover:bg-ember-400"
               >
                 <Plus className="h-4 w-4" />
@@ -158,17 +154,21 @@ export function DashboardPage() {
         </div>
 
         <aside className="panel-surface p-6">
-          <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Next workflow</p>
-          <h2 className="mt-3 text-2xl font-semibold text-ink-900">Import and inspect</h2>
-          <p className="mt-3 text-sm leading-7 text-ink-600">
-            Once a project exists, the import workspace will attach parsed files and preview their channel mapping into the
-            selected campaign.
-          </p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Quick start</p>
+              <h2 className="mt-3 text-2xl font-semibold text-ink-900">What happens next</h2>
+            </div>
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-teal-50 text-teal-600">
+              <MapPinned className="h-5 w-5" />
+            </div>
+          </div>
+          <p className="mt-3 text-sm leading-7 text-ink-600">Build the workspace once, then move through the rest of the flow in order.</p>
           <div className="mt-6 space-y-3">
             {[
-              "Create a project workspace",
-              "Upload raw logger or spreadsheet data",
-              "Preview mapped channels and metadata",
+              "Create or select a project",
+              "Import logger or spreadsheet files",
+              "Review channel mapping and metadata",
               "Continue into QC and analysis",
             ].map((step, index) => (
               <div key={step} className="panel-muted flex items-center gap-3 px-3 py-3 text-sm text-ink-700">

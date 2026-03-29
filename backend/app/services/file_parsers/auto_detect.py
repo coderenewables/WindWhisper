@@ -8,26 +8,26 @@ from app.schemas import ColumnInfo
 
 
 MEASUREMENT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("speed_sd", re.compile(r"(?:speed|ws|vel).*(?:sd|std|sigma)|(?:sd|std).*(?:speed|ws|vel)", re.IGNORECASE)),
+    ("speed_sd", re.compile(r"(?:speed|spd|ws|vel).*(?:sd|std|sigma)|(?:sd|std).*(?:speed|spd|ws|vel)", re.IGNORECASE)),
     ("direction_sd", re.compile(r"(?:dir|wd|direction).*(?:sd|std|sigma)|(?:sd|std).*(?:dir|wd|direction)", re.IGNORECASE)),
     ("turbulence_intensity", re.compile(r"(?:\bti\b|turbulence\s*intensity)", re.IGNORECASE)),
-    ("gust", re.compile(r"gust|(?:speed|ws|vel).*max|max.*(?:speed|ws|vel)", re.IGNORECASE)),
-    ("minimum", re.compile(r"(?:speed|ws|vel|temp|temperature).*min|min.*(?:speed|ws|vel|temp|temperature)", re.IGNORECASE)),
+    ("gust", re.compile(r"gust|(?:speed|spd|ws|vel).*max|max.*(?:speed|spd|ws|vel)", re.IGNORECASE)),
+    ("minimum", re.compile(r"(?:speed|spd|ws|vel|temp|temperature).*min|min.*(?:speed|spd|ws|vel|temp|temperature)", re.IGNORECASE)),
     ("humidity", re.compile(r"\brh\b|relative\s*humidity|humidity", re.IGNORECASE)),
     ("solar", re.compile(r"solar|irradiance|radiation", re.IGNORECASE)),
-    ("speed", re.compile(r"(?:^|[_\s])(speed|ws|vel)(?:$|[_\s\d])", re.IGNORECASE)),
+    ("speed", re.compile(r"(?:^|[_\s])(speed|spd|ws|vel)(?:$|[_\s\d])", re.IGNORECASE)),
     ("direction", re.compile(r"(?:^|[_\s])(dir|wd|direction)(?:$|[_\s\d])", re.IGNORECASE)),
     ("temperature", re.compile(r"temp|temperature|airtc|tc", re.IGNORECASE)),
     ("pressure", re.compile(r"press|pressure|baro|bp", re.IGNORECASE)),
 )
 
 HEIGHT_PATTERNS: dict[str, re.Pattern[str]] = {
-    "speed": re.compile(r"(?:speed|ws|vel).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
-    "speed_sd": re.compile(r"(?:speed|ws|vel).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
+    "speed": re.compile(r"(?:speed|spd|ws|vel).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
+    "speed_sd": re.compile(r"(?:speed|spd|ws|vel).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
     "direction": re.compile(r"(?:dir|wd|direction).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
     "direction_sd": re.compile(r"(?:dir|wd|direction).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
     "turbulence_intensity": re.compile(r"(?:ti|turbulence).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
-    "gust": re.compile(r"(?:gust|max|speed|ws|vel).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
+    "gust": re.compile(r"(?:gust|max|speed|spd|ws|vel).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
     "temperature": re.compile(r"(?:temp|temperature|airtc|tc).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
     "pressure": re.compile(r"(?:press|pressure|baro|bp).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),
     "humidity": re.compile(r"(?:rh|humidity).*?(\d+(?:\.\d+)?)\s*m?", re.IGNORECASE),

@@ -93,7 +93,7 @@ test("renders the dashboard project list and geospatial panel", async () => {
     </MemoryRouter>,
   );
 
-  await screen.findByRole("heading", { name: /organize measurement campaigns before import, qc, and energy analysis/i });
+  await screen.findByRole("heading", { name: /project workspaces/i });
   expect(screen.getByRole("heading", { name: /project map/i })).toBeInTheDocument();
   expect(screen.getByText(/coastal mast, ridge met/i)).toBeInTheDocument();
 });

@@ -53,6 +53,28 @@ export function TimeSeriesChart({
 }: TimeSeriesChartProps) {
   const [shiftPressed, setShiftPressed] = useState(false);
   const columnsById = Object.fromEntries(datasetColumns.map((column) => [column.id, column]));
+  const overlayShapes = useMemo<Partial<Shape>[]>(
+    () =>
+      flaggedRanges.map((flaggedRange) => {
+        const meta = flagMetaById[flaggedRange.flag_id];
+        return {
+          type: "rect" as const,
+          xref: "x" as const,
+          yref: "paper" as const,
+          x0: flaggedRange.start_time,
+          x1: flaggedRange.end_time,
+          y0: 0,
+          y1: 1,
+          fillcolor: hexToRgba(meta?.color, 0.14),
+          line: {
+            color: hexToRgba(meta?.color, 0.55),
+            width: 1,
+          },
+          layer: "below" as const,
+        };
+      }),
+    [flagMetaById, flaggedRanges],
+  );
 
   useEffect(() => {
     if (!manualSelectionEnabled) {
@@ -128,28 +150,6 @@ export function TimeSeriesChart({
   const excludedFlags = excludedFlagIds
     .map((flagId) => ({ id: flagId, ...flagMetaById[flagId] }))
     .filter((flag): flag is { id: string; name: string; color: string | null } => Boolean(flag?.name));
-  const overlayShapes = useMemo<Partial<Shape>[]>(
-    () =>
-      flaggedRanges.map((flaggedRange) => {
-        const meta = flagMetaById[flaggedRange.flag_id];
-        return {
-          type: "rect" as const,
-          xref: "x" as const,
-          yref: "paper" as const,
-          x0: flaggedRange.start_time,
-          x1: flaggedRange.end_time,
-          y0: 0,
-          y1: 1,
-          fillcolor: hexToRgba(meta?.color, 0.14),
-          line: {
-            color: hexToRgba(meta?.color, 0.55),
-            width: 1,
-          },
-          layer: "below" as const,
-        };
-      }),
-    [flagMetaById, flaggedRanges],
-  );
 
   const layout: Partial<Layout> = {
     autosize: true,

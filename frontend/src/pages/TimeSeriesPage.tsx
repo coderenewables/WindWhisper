@@ -176,6 +176,7 @@ export function TimeSeriesPage() {
   });
 
   const activeProject = projects.find((project) => project.id === projectId) ?? null;
+  const renderedPointCount = data?.timestamps.length ?? 0;
 
   function updateSearch(next: { projectId?: string; datasetId?: string }) {
     const nextParams = new URLSearchParams(searchParams);
@@ -204,18 +205,16 @@ export function TimeSeriesPage() {
       <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,0.9fr)] xl:items-end">
           <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Task 9</span>
-            <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Explore imported datasets with an interactive, zoomable time-series workspace.
+            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
+              Time-series: interactive zoom, pan, and resampling.
             </h1>
-            <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-600 sm:text-base">
-              Select a project, choose a dataset, and inspect multiple channels with zoom, pan, dual axes, and server-side
-              resampling for larger windows.
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
+              Choose a project and dataset to inspect multiple channels with server-side resampling support.
             </p>
           </div>
 
-          <div className="panel-muted grid gap-4 p-5 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
+          <div className="panel-muted grid gap-3 p-3 sm:grid-cols-2 text-sm">
+            <label className="grid gap-1 text-xs font-medium text-ink-800">
               Project
               <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-2xl border-ink-200 bg-white">
                 <option value="">Select a project</option>
@@ -227,7 +226,7 @@ export function TimeSeriesPage() {
               </select>
             </label>
 
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
+            <label className="grid gap-1 text-xs font-medium text-ink-800">
               Dataset
               <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-2xl border-ink-200 bg-white" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
                 <option value="">Select a dataset</option>
@@ -303,7 +302,7 @@ export function TimeSeriesPage() {
                 <Waves className="h-4 w-4 text-teal-500" />
                 Returned points
               </div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{data?.timestamps.length.toLocaleString() ?? "0"}</p>
+              <p className="mt-3 text-xl font-semibold text-ink-900">{renderedPointCount.toLocaleString()}</p>
               <p className="mt-1 text-sm leading-7 text-ink-600">Points currently rendered after resampling.</p>
             </div>
           </section>

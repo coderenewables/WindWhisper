@@ -124,31 +124,30 @@ export function MCPWorkspace({
       <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.8fr)] xl:items-end">
           <div>
-            <span className="font-mono text-xs uppercase tracking-[0.34em] text-ember-500">Task 23</span>
-            <h1 className="mt-4 max-w-4xl text-4xl font-semibold leading-tight text-ink-900 sm:text-5xl">
-              Correlate short-term site measurements with long-term reference data, compare MCP methods, and inspect long-term adjusted wind statistics.
+            <h1 className="mt-3 max-w-4xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
+              MCP: correlate site data with reference, compare methods, and predict long-term wind.
             </h1>
-            <p className="mt-4 max-w-3xl text-sm leading-7 text-ink-600">
-              This workspace walks through the full measure-correlate-predict sequence: choose datasets, inspect concurrent overlap, compare uncertainty across methods, then review the predicted long-term distribution.
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-ink-600">
+              Choose datasets, run correlation and comparison, then produce long-term predictions.
             </p>
           </div>
 
-          <div className="panel-muted p-5">
-            <div className="flex items-center gap-2 text-sm font-medium text-ink-800">
+          <div className="panel-muted p-3 text-sm">
+            <div className="flex items-center gap-2 text-xs font-medium text-ink-800">
               <Sparkles className="h-4 w-4 text-teal-500" />
-              Workflow status
+              Status
             </div>
-            <div className="mt-4 space-y-3 text-sm text-ink-700">
-              <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                <span>Concurrent correlation</span>
-                <span className={correlationData ? "text-emerald-700" : "text-ink-500"}>{correlationData ? "Complete" : "Pending"}</span>
+            <div className="mt-3 space-y-2 text-xs text-ink-700">
+              <div className="flex items-center justify-between rounded-2xl bg-white px-3 py-2">
+                <span>Correlation</span>
+                <span className={correlationData ? "text-emerald-700" : "text-ink-500"}>{correlationData ? "Done" : "Pending"}</span>
               </div>
-              <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                <span>Method comparison</span>
+              <div className="flex items-center justify-between rounded-2xl bg-white px-3 py-2">
+                <span>Comparison</span>
                 <span className={comparisonData ? "text-emerald-700" : "text-ink-500"}>{comparisonData ? comparisonData.recommended_method.replace("_", " ") : "Pending"}</span>
               </div>
-              <div className="flex items-center justify-between rounded-2xl bg-white px-4 py-3">
-                <span>Prediction run</span>
+              <div className="flex items-center justify-between rounded-2xl bg-white px-3 py-2">
+                <span>Prediction</span>
                 <span className={predictionData ? "text-emerald-700" : "text-ink-500"}>{predictionData ? predictionData.method.replace("_", " ") : "Pending"}</span>
               </div>
             </div>

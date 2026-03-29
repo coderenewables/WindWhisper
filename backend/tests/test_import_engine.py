@@ -99,6 +99,31 @@ async def test_upload_accepts_tab_delimited_text(client: AsyncClient) -> None:
     assert payload["row_count"] == 3
 
 
+async def test_upload_detects_spd_alias_as_speed_and_extracts_height(client: AsyncClient) -> None:
+    project_id = await create_project_for_import(client)
+    csv_data = "\n".join(
+        [
+            "Timestamp,Spd_80m,Dir_80m",
+            "2025-01-01T00:00:00Z,7.1,182",
+            "2025-01-01T00:10:00Z,7.4,188",
+            "2025-01-01T00:20:00Z,6.9,176",
+        ],
+    )
+
+    response = await client.post(
+        f"/api/import/upload/{project_id}",
+        files={"file": ("spd_alias.csv", csv_data.encode("utf-8"), "text/csv")},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    columns = {column["name"]: column for column in payload["columns"]}
+    assert columns["Spd_80m"]["measurement_type"] == "speed"
+    assert columns["Spd_80m"]["height_m"] == 80.0
+    assert columns["Dir_80m"]["measurement_type"] == "direction"
+    assert columns["Dir_80m"]["height_m"] == 80.0
+
+
 async def test_upload_excel_returns_sheets_and_detected_enhanced_columns(client: AsyncClient) -> None:
     project_id = await create_project_for_import(client)
 
