@@ -206,6 +206,59 @@ The backend reads settings from environment variables (or a `.env` file in `back
 | `CORS_ORIGINS` | `["http://localhost:5173","http://127.0.0.1:5173"]` | Allowed CORS origins (JSON array) |
 | `DEBUG` | `false` | Enable debug mode & verbose SQL logging |
 | `APP_VERSION` | `0.1.0` | Reported API version |
+| `SEED_DEMO_DATA` | `true` | Auto-create the demo project and sample datasets on startup |
+| `VITE_API_BASE_URL` | `/api` | Frontend API base URL override for non-proxied deployments |
+
+---
+
+## Demo Workspace
+
+Fresh databases now auto-seed a ready-to-explore demo workspace on startup.
+
+Included by default:
+
+- `GoKaatru Demo Project`
+- `Demo Met Mast` seeded from `data/sample_met_tower.csv`
+- `Demo ERA5 Reference` seeded from `data/sample_reanalysis_era5.csv`
+- `Demo MERRA-2 Reference` derived and seeded automatically for MCP comparisons
+- `Sample 3 MW Turbine` power curve seeded from `data/sample_power_curve.csv`
+
+This gives new users a complete path through dashboard, time series, QC, MCP, energy, export, and reporting without importing or downloading anything first.
+
+---
+
+## Vercel Deployment
+
+The repository now includes Vercel-ready defaults:
+
+- `vercel.json` builds the Vite frontend from `frontend/`
+- `api/[...route].py` exposes the FastAPI backend as a Vercel Python function
+- `requirements.txt` installs the backend package for the Python runtime
+- API docs are available under `/api/docs` and `/api/redoc`
+
+Recommended production setup:
+
+1. Create a managed PostgreSQL database reachable from Vercel.
+2. Add `DATABASE_URL` in the Vercel project environment variables.
+3. Optionally set `VERCEL_RUN_DB_MIGRATIONS=true` to run `alembic upgrade head` during builds.
+4. Keep `SEED_DEMO_DATA=true` so first-time users land in a populated demo workspace.
+5. If you split frontend and backend across different domains, set `VITE_API_BASE_URL` and `CORS_ORIGINS` accordingly.
+
+Typical Vercel environment values:
+
+```bash
+DATABASE_URL=postgresql+asyncpg://USER:PASSWORD@HOST:5432/DBNAME
+SEED_DEMO_DATA=true
+VERCEL_RUN_DB_MIGRATIONS=true
+```
+
+Deploy with Vercel CLI from the repo root:
+
+```bash
+npm i -g vercel
+vercel
+vercel --prod
+```
 
 ---
 
@@ -225,7 +278,7 @@ All endpoints are prefixed with `/api`. Full reference: [docs/api.md](docs/api.m
 | Reports | `/api/reports` | Generate PDF / DOCX reports |
 | Workflows | `/api/workflows` | Create, run & manage automation pipelines |
 
-Interactive API documentation is available at `/docs` (Swagger UI) and `/redoc` (ReDoc) when the backend is running.
+Interactive API documentation is available at `/api/docs` (Swagger UI) and `/api/redoc` (ReDoc) when the backend is running.
 
 ---
 

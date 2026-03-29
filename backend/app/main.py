@@ -15,6 +15,7 @@ from app.api.reports import router as reports_router
 from app.api.workflows import router as workflows_router
 from app.config import settings
 from app.database import SessionLocal, close_database_connections, ping_database
+from app.services.demo_seed import ensure_seeded_demo_workspace
 from app.services.energy_estimate import ensure_seeded_default_power_curve
 
 
@@ -28,6 +29,8 @@ async def lifespan(_: FastAPI):
         logger.warning("Database connectivity check failed during startup.")
     else:
         async with SessionLocal() as session:
+            if settings.seed_demo_data:
+                await ensure_seeded_demo_workspace(session)
             await ensure_seeded_default_power_curve(session)
     try:
         yield
@@ -39,6 +42,9 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     debug=settings.debug,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json",
     lifespan=lifespan,
 )
 

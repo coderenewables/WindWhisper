@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     app_name: str = "GoKaatru API"
     app_version: str = Field(default="0.1.0", alias="APP_VERSION")
     debug: bool = Field(default=False, alias="DEBUG")
+    seed_demo_data: bool = Field(default=True, alias="SEED_DEMO_DATA")
     database_url: str = Field(
         default="postgresql+asyncpg://windwhisper:windwhisper@localhost:5432/windwhisper",
         alias="DATABASE_URL",
