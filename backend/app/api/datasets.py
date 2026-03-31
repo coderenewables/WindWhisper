@@ -306,3 +306,14 @@ async def get_dataset_timeseries(
         timestamps=timestamps,
         columns=column_payload,
     )
+
+
+@router.delete("/{dataset_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_dataset(dataset_id: uuid.UUID, db: DbSession) -> None:
+    dataset = await db.get(Dataset, dataset_id)
+    if dataset is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Dataset not found")
+    
+    await db.delete(dataset)
+    await db.commit()
+

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import calendar
 import io
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models import PowerCurve
+
+logger = logging.getLogger(__name__)
 
 
 STANDARD_AIR_DENSITY_KG_PER_M3 = 1.225
@@ -76,8 +79,10 @@ async def ensure_seeded_default_power_curve(db: AsyncSession) -> PowerCurve | No
         )
     ).scalar_one_or_none()
     if existing is not None:
+        logger.info("Demo power curve already exists. Skipping ingestion.")
         return existing
 
+    logger.info("Seeding default demo power curve.")
     sample_path = get_sample_power_curve_path()
     if not sample_path.exists():
         return None

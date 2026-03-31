@@ -1,10 +1,11 @@
-import { ArrowLeft, CheckCircle2, Database, FileUp, LineChart, MapPin, Radar, ShieldCheck } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Database, FileUp, LineChart, MapPin, Radar, ShieldCheck, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useLocation, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 
-import { getDatasetHistory, listProjectDatasets, undoDatasetChange } from "../api/datasets";
+import { deleteDataset, getDatasetHistory, listProjectDatasets, undoDatasetChange } from "../api/datasets";
 import { HistoryPanel } from "../components/common/HistoryPanel";
 import { LoadingSpinner } from "../components/common/LoadingSpinner";
+import { ConfirmDeleteDialog } from "../components/common/ConfirmDeleteDialog";
 import type { DatasetImportResponse, DatasetSummary } from "../types/dataset";
 import type { ChangeLogEntry } from "../types/history";
 import { useProjectStore } from "../stores/projectStore";
@@ -12,7 +13,7 @@ import { useProjectStore } from "../stores/projectStore";
 export function ProjectPage() {
   const params = useParams();
   const location = useLocation();
-  const { activeProject, projects, error, fetchProject } = useProjectStore();
+  const { activeProject, projects, error, fetchProject, deleteProject: storeDeleteProject } = useProjectStore();
   const importedDataset = (location.state as { importedDataset?: DatasetImportResponse } | null)?.importedDataset;
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [isLoadingDatasets, setIsLoadingDatasets] = useState(false);
@@ -21,7 +22,39 @@ export function ProjectPage() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isUndoingHistory, setIsUndoingHistory] = useState(false);
 
+  // Delete states
+  const [isDeletingProject, setIsDeletingProject] = useState(false);
+  const [isProjectDeleteOpen, setIsProjectDeleteOpen] = useState(false);
+  const [isDeletingDataset, setIsDeletingDataset] = useState(false);
+  const [datasetToDelete, setDatasetToDelete] = useState<DatasetSummary | null>(null);
+
+  const navigate = useNavigate();
+
   const project = activeProject?.id === params.id ? activeProject : projects.find((item) => item.id === params.id) ?? null;
+
+  async function handleDeleteProject() {
+    if (!project) return;
+    setIsDeletingProject(true);
+    try {
+      await storeDeleteProject(project.id);
+      navigate("/");
+    } finally {
+      setIsDeletingProject(false);
+      setIsProjectDeleteOpen(false);
+    }
+  }
+
+  async function handleDeleteDataset() {
+    if (!datasetToDelete || !project) return;
+    setIsDeletingDataset(true);
+    try {
+      await deleteDataset(datasetToDelete.id);
+      await refreshDatasets(project.id);
+    } finally {
+      setIsDeletingDataset(false);
+      setDatasetToDelete(null);
+    }
+  }
 
   async function refreshDatasets(projectId: string) {
     setIsLoadingDatasets(true);
@@ -136,7 +169,24 @@ export function ProjectPage() {
     );
   }
 
-  return (
+  return (    <>
+      <ConfirmDeleteDialog
+        open={isProjectDeleteOpen}
+        title="Delete Project"
+        itemName={project?.name || "this project"}
+        onClose={() => setIsProjectDeleteOpen(false)}
+        onConfirm={handleDeleteProject}
+        isDeleting={isDeletingProject}
+      />
+
+      <ConfirmDeleteDialog
+        open={!!datasetToDelete}
+        title="Delete Dataset"
+        itemName={datasetToDelete?.name || "this dataset"}
+        onClose={() => setDatasetToDelete(null)}
+        onConfirm={handleDeleteDataset}
+        isDeleting={isDeletingDataset}
+      />
     <div className="space-y-6">
       <section className="panel-surface p-6 sm:p-8">
         <Link to="/" className="inline-flex items-center gap-2 text-sm font-medium text-ink-600 transition hover:text-ink-900">
@@ -167,8 +217,14 @@ export function ProjectPage() {
                 </p>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row">
-                <Link
+              <div className="flex flex-col gap-3 sm:flex-row">                  <button
+                    type="button"
+                    onClick={() => setIsProjectDeleteOpen(true)}
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-5 py-3 text-sm font-medium text-red-700 transition hover:bg-red-100 hover:border-red-300"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete project
+                  </button>                <Link
                   to={`/import?projectId=${project.id}`}
                   state={{ projectId: project.id }}
                   className="inline-flex items-center justify-center gap-2 rounded-2xl bg-ember-500 px-5 py-3 text-sm font-medium text-white transition hover:bg-ember-400"
@@ -290,8 +346,14 @@ export function ProjectPage() {
                           >
                             <Radar className="h-4 w-4" />
                             MCP
-                          </Link>
-                        </div>
+                          </Link>                            <button
+                              type="button"
+                              onClick={() => setDatasetToDelete(dataset)}
+                              className="inline-flex items-center gap-2 rounded-2xl border border-red-200 px-3 py-2 text-xs font-medium uppercase tracking-[0.18em] text-red-700 transition hover:bg-red-50 hover:border-red-300"
+                              title="Delete Dataset"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>                        </div>
                       </div>
                     ))}
                   </div>
@@ -323,5 +385,6 @@ export function ProjectPage() {
         )}
       </section>
     </div>
+    </>
   );
 }

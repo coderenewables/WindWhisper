@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import DataColumn, Dataset, Project, TimeseriesData
 from app.services.file_parsers.auto_detect import detect_columns, infer_time_step_seconds
 
+logger = logging.getLogger(__name__)
 
 DEMO_PROJECT_NAME = "GoKaatru Demo Project"
 DEMO_PROJECT_DESCRIPTION = (
@@ -109,20 +111,19 @@ async def _get_demo_project(db: AsyncSession) -> Project | None:
     return (
         await db.execute(
             select(Project).where(
-                or_(
-                    Project.name == DEMO_PROJECT_NAME,
-                    Project.description == DEMO_PROJECT_DESCRIPTION,
-                ),
+                Project.name == DEMO_PROJECT_NAME,
             ),
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
 
 
 async def _ensure_demo_project(db: AsyncSession) -> Project:
     existing = await _get_demo_project(db)
     if existing is not None:
+        logger.info("Demo project already exists. Using existing project.")
         return existing
 
+    logger.info("Demo project not found. Creating brand new demo project.")
     project = Project(
         name=DEMO_PROJECT_NAME,
         description=DEMO_PROJECT_DESCRIPTION,
@@ -219,6 +220,7 @@ async def ensure_seeded_demo_workspace(db: AsyncSession) -> Project:
     merra_exists = await _dataset_exists(db, project.id, DEMO_MERRA_DATASET_NAME)
 
     if not measurement_exists:
+        logger.info(f"Seeding measurement dataset from {DEMO_DATASET_FILE_NAME}")
         measurement_frame = _load_csv_frame(DEMO_DATASET_FILE_NAME, row_limit=DEMO_MEASUREMENT_ROW_LIMIT)
         await _create_dataset(
             db,
@@ -230,6 +232,8 @@ async def ensure_seeded_demo_workspace(db: AsyncSession) -> Project:
             source_label="sample_met_tower",
             frame=measurement_frame,
         )
+    else:
+        logger.info("Demo measurement dataset already exists. Skipping ingestion.")
 
     era5_frame: pd.DataFrame | None = None
     if not era5_exists or not merra_exists:

@@ -44,6 +44,7 @@ services:
       DEBUG: "false"
     volumes:
       - upload-data:/app/uploads
+      - ./data:/data:ro
     depends_on:
       postgres:
         condition: service_healthy

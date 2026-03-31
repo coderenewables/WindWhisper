@@ -87,3 +87,8 @@ export async function undoDatasetChange(datasetId: string): Promise<UndoResponse
   return response.data;
 }
 
+export async function deleteDataset(datasetId: string): Promise<void> {
+  await apiClient.delete(`/datasets/${datasetId}`);
+}
+
+
