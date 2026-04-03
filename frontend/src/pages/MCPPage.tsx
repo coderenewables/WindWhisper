@@ -1,7 +1,9 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Bot } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { useAi } from "../ai/AiProvider";
+import { InsightBanner } from "../components/ai/InsightBanner";
 import { downloadMcpReferenceData, getMcpComparison, getMcpCorrelation, getMcpDownloadStatus, getMcpPrediction } from "../api/analysis";
 import { getDataset, listProjectDatasets } from "../api/datasets";
 import { MCPWorkspace } from "../components/mcp/MCPWorkspace";
@@ -77,7 +79,9 @@ export function MCPPage() {
   const [isCorrelating, setIsCorrelating] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
   const [isPredicting, setIsPredicting] = useState(false);
+  const [mcpInsight, setMcpInsight] = useState<string | null>(null);
   const { projects, fetchProjects } = useProjectStore();
+  const { sendPrompt } = useAi();
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -310,6 +314,10 @@ export function MCPPage() {
       if (!predictionData && response.recommended_method) {
         setMethod(response.recommended_method);
       }
+      // Show insight banner after comparison
+      if (response.recommended_method) {
+        setMcpInsight(`MCP comparison complete. Recommended method: ${response.recommended_method}. Use AI Recommend for a detailed tradeoff analysis.`);
+      }
     } catch (error) {
       setPredictionError(error instanceof Error ? error.message : "Unable to compare MCP methods");
     } finally {
@@ -391,28 +399,24 @@ export function MCPPage() {
   }
 
   return (
-    <div className="space-y-6">
-      {!projectId ? (
-        <section className="panel-surface p-6">
-          <p className="text-sm text-ink-600">Select a project to start the MCP workflow.</p>
-        </section>
+    <div className="space-y-3">
+      <AiMcpButton projectId={projectId} />
+      {mcpInsight ? (
+        <InsightBanner
+          message={mcpInsight}
+          severity="info"
+          actionLabel="AI Explain"
+          onAction={() => { void sendPrompt(projectId, "Explain the MCP comparison results. Which method is best and why? Check for seasonal bias and cross-validation stability."); setMcpInsight(null); }}
+          onDismiss={() => setMcpInsight(null)}
+        />
       ) : null}
+      {!projectId ? <p className="py-6 text-center text-xs text-ink-400">Select a project to start MCP.</p> : null}
 
       {projectId && datasets.length < 1 && !isLoadingDatasets ? (
-        <section className="panel-surface p-6">
-          <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-800">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div>
-              <p className="font-medium text-amber-900">MCP needs a site dataset to start</p>
-              <p className="mt-1">Import at least one site dataset first. Reference downloads become available in the MCP workspace after that.</p>
-              {activeProject ? (
-                <Link to={`/project/${activeProject.id}`} className="mt-3 inline-flex text-sm font-medium text-amber-900 underline decoration-amber-300 underline-offset-4">
-                  Return to the project workspace
-                </Link>
-              ) : null}
-            </div>
-          </div>
-        </section>
+        <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>Import a site dataset first.{activeProject ? <> <Link to={`/project/${activeProject.id}`} className="font-medium underline">Project</Link></> : null}</span>
+        </div>
       ) : null}
 
       {projectId && (datasets.length >= 1 || isLoadingDatasets) ? (
@@ -485,6 +489,25 @@ export function MCPPage() {
           onRunPrediction={() => void runPrediction()}
         />
       ) : null}
+    </div>
+  );
+}
+
+/* ---------- AI Recommend button (hidden when AI disabled) ---------- */
+
+function AiMcpButton({ projectId }: { projectId: string }) {
+  const { enabled, sendPrompt } = useAi();
+  if (!enabled || !projectId) return null;
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        type="button"
+        onClick={() => void sendPrompt(projectId, "Evaluate the MCP methods for this project. Compare cross-validation performance, check for seasonal bias, and recommend the best method with reasoning.")}
+        className="inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700 transition hover:bg-teal-100 dark:bg-teal-900/20 dark:text-teal-400"
+      >
+        <Bot className="h-3 w-3" /> AI Recommend
+      </button>
     </div>
   );
 }

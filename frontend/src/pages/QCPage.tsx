@@ -1,7 +1,9 @@
-import { AlertTriangle, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Bot } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { useAi } from "../ai/AiProvider";
+import { InsightBanner } from "../components/ai/InsightBanner";
 import { getDataset, getDatasetHistory, listProjectDatasets, undoDatasetChange } from "../api/datasets";
 import {
   applyFlagRules,
@@ -22,7 +24,6 @@ import { Modal } from "../components/common/Modal";
 import { FlagManager } from "../components/qc/FlagManager";
 import { FlagRuleEditor } from "../components/qc/FlagRuleEditor";
 import { GapFillPanel } from "../components/qc/GapFillPanel";
-import { QCDashboard } from "../components/qc/QCDashboard";
 import { TowerShadowDetector } from "../components/qc/TowerShadowDetector";
 import { ChannelSelector } from "../components/timeseries/ChannelSelector";
 import { TimeSeriesChart } from "../components/timeseries/TimeSeriesChart";
@@ -74,7 +75,13 @@ export function QCPage() {
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [isUndoingHistory, setIsUndoingHistory] = useState(false);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [qcInsight, setQcInsight] = useState<{ message: string; severity: "info" | "warning" | "critical" } | null>(null);
   const { projects, fetchProjects } = useProjectStore();
+  const { sendPrompt } = useAi();
+
+  const showQcInsight = (message: string, severity: "info" | "warning" | "critical" = "info") => {
+    setQcInsight({ message, severity });
+  };
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -315,233 +322,173 @@ export function QCPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,0.9fr)] xl:items-end">
-          <div>
-            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
-              QC: review flags, define rules, and mark suspect intervals.
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
-              Use the editor and chart to inspect flagged intervals and apply exclusions.
-            </p>
-          </div>
-          <div className="panel-muted grid gap-3 p-3 sm:grid-cols-2 text-sm">
-            <label className="grid gap-1 text-xs font-medium text-ink-800">
-              Project
-              <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-2xl border-ink-200 bg-white">
-                <option value="">Select a project</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="grid gap-1 text-xs font-medium text-ink-800">
-              Dataset
-              <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-2xl border-ink-200 bg-white" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
-                <option value="">Select a dataset</option>
-                {datasets.map((dataset) => (
-                  <option key={dataset.id} value={dataset.id}>{dataset.name}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-      </section>
+    <div className="space-y-3">
+      {/* Compact toolbar row */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-sm font-semibold text-ink-900">QC</h1>
+        <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+          <option value="">Project</option>
+          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-lg border-ink-200 bg-white py-1 text-xs" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
+          <option value="">Dataset</option>
+          {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        {datasetDetail && (
+          <span className="ml-auto flex items-center gap-2">
+            <AiQcButton projectId={projectId} />
+            <span className="text-[11px] text-ink-400">
+              {flags.length} flags &middot; {flaggedRanges.length} ranges &middot; {renderedPointCount.toLocaleString()} pts
+            </span>
+          </span>
+        )}
+      </div>
 
-      {!projectId ? <section className="panel-surface p-8 text-sm text-ink-600">Choose a project to start the QC workflow.</section> : null}
+      {!projectId ? <p className="py-8 text-center text-xs text-ink-400">Select a project to start QC.</p> : null}
 
       {pageError || error ? (
-        <section className="panel-surface flex items-start gap-3 border border-red-200 bg-red-50/80 p-4 text-sm text-red-700">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50/80 p-2 text-xs text-red-700">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>{pageError || error}</span>
-        </section>
+        </div>
       ) : null}
 
       {projectId && !isLoadingDatasets && datasets.length === 0 ? (
-        <section className="panel-surface p-8">
-          <h2 className="text-2xl font-semibold text-ink-900">No datasets available</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-ink-600">Import data into this project before using the QC dashboard.</p>
-          <Link to={`/import?projectId=${projectId}`} className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-ember-500 px-5 py-3 text-sm font-medium text-white transition hover:bg-ember-400">Import dataset</Link>
-        </section>
+        <div className="flex flex-col items-center py-8 text-center">
+          <p className="text-xs text-ink-500">No datasets yet.</p>
+          <Link to={`/import?projectId=${projectId}`} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-ember-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-ember-400">Import</Link>
+        </div>
+      ) : null}
+
+      {/* AI insight banners for QC */}
+      <QcInsightBanners projectId={projectId} />
+      {qcInsight ? (
+        <InsightBanner
+          message={qcInsight.message}
+          severity={qcInsight.severity}
+          onDismiss={() => setQcInsight(null)}
+          actionLabel="View Impact"
+          onAction={() => { void sendPrompt(projectId, "Show me the downstream impact of the QC flags just applied to this dataset."); setQcInsight(null); }}
+        />
       ) : null}
 
       {datasetDetail ? (
         <>
-          <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-4">
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700"><ShieldCheck className="h-4 w-4 text-teal-500" />Active dataset</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{datasetDetail.name}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">{activeProject?.name ?? "Active project"}</p>
-            </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="text-sm font-medium text-ink-700">Flags</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{flags.length}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Configured QC categories for this dataset.</p>
-            </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="text-sm font-medium text-ink-700">Ranges</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{flaggedRanges.length}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Current flagged intervals across manual and automatic rules.</p>
-            </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="text-sm font-medium text-ink-700">Rendered points</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{renderedPointCount.toLocaleString()}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Visible chart points for the current time window.</p>
-            </div>
-          </section>
+          {/* Time series controls + chart — full width */}
+          <TimeSeriesControls
+            resample={resample}
+            appliedResample={data?.resample ?? null}
+            start={visibleRange.start}
+            end={visibleRange.end}
+            onResampleChange={setResample}
+            onRangeChange={setVisibleRange}
+            onFitAll={() => setVisibleRange({ start: datasetDetail.start_time, end: datasetDetail.end_time })}
+          />
 
-          <QCDashboard
-            sidebar={
-              <>
-                <TowerShadowDetector
-                  datasetId={datasetDetail.id}
-                  columns={datasetDetail.columns}
-                  onApplied={async (flagId) => {
-                    await refreshQcState(datasetDetail.id, flagId);
-                    await refreshHistory(datasetDetail.id);
-                  }}
-                />
-                <FlagManager
-                  flags={flags}
-                  flaggedRanges={flaggedRanges}
-                  activeFlagId={activeFlagId}
-                  flagVisibility={flagVisibility}
-                  isBusy={isLoadingQc}
-                  onSelectFlag={(flagId) => setActiveFlagId(flagId)}
-                  onToggleVisibility={(flagId) => setFlagVisibility((current) => ({ ...current, [flagId]: !(current[flagId] ?? true) }))}
-                  onCreateFlag={async (payload) => {
-                    if (!datasetDetail) {
-                      return;
-                    }
-                    const created = await createFlag(datasetDetail.id, payload);
-                    await refreshQcState(datasetDetail.id, created.id);
-                    await refreshHistory(datasetDetail.id);
-                  }}
-                  onApplyRules={async (flagId) => {
-                    if (!datasetDetail) {
-                      return;
-                    }
-                    await applyFlagRules(flagId);
-                    await refreshQcState(datasetDetail.id, flagId);
-                    await refreshHistory(datasetDetail.id);
-                  }}
-                  onDeleteFlag={async (flagId) => {
-                    if (!datasetDetail) {
-                      return;
-                    }
-                    await deleteFlag(flagId);
-                    await refreshQcState(datasetDetail.id, activeFlagId === flagId ? null : activeFlagId);
-                    await refreshHistory(datasetDetail.id);
-                  }}
-                  onDeleteRange={async (rangeId) => {
-                    if (!datasetDetail) {
-                      return;
-                    }
-                    await deleteFlaggedRange(rangeId);
-                    await refreshQcState(datasetDetail.id, activeFlagId);
-                    await refreshHistory(datasetDetail.id);
-                  }}
-                />
-                <FlagRuleEditor
-                  activeFlag={activeFlag}
-                  columns={datasetDetail.columns}
-                  rules={flagRules}
-                  onCreateRule={async (payload) => {
-                    if (!activeFlag || !datasetDetail) {
-                      return;
-                    }
-                    await createFlagRule(activeFlag.id, payload);
-                    await refreshQcState(datasetDetail.id, activeFlag.id);
-                  }}
-                  onUpdateRule={async (ruleId, payload) => {
-                    if (!activeFlag || !datasetDetail) {
-                      return;
-                    }
-                    const previousRules = flagRules;
-                    const optimisticRules = sortRules(
-                      flagRules.map((rule) =>
-                        rule.id === ruleId
-                          ? {
-                              ...rule,
-                              column_id: payload.column_id,
-                              operator: payload.operator,
-                              value: payload.value ?? null,
-                              logic: payload.logic ?? "AND",
-                              group_index: payload.group_index ?? rule.group_index,
-                              order_index: payload.order_index ?? rule.order_index,
-                            }
-                          : rule,
-                      ),
-                    );
-                    setFlagRules(optimisticRules);
-                    try {
-                      await updateFlagRule(ruleId, payload);
-                    } catch (requestError) {
-                      setFlagRules(previousRules);
-                      throw requestError;
-                    }
-                  }}
-                  onDeleteRule={async (ruleId) => {
-                    if (!activeFlag || !datasetDetail) {
-                      return;
-                    }
-                    const previousRules = flagRules;
-                    setFlagRules(flagRules.filter((rule) => rule.id !== ruleId));
-                    try {
-                      await deleteFlagRule(ruleId);
-                    } catch (requestError) {
-                      setFlagRules(previousRules);
-                      throw requestError;
-                    }
-                  }}
-                />
-              </>
+          <TimeSeriesChart
+            datasetColumns={datasetDetail.columns}
+            selectedColumnIds={selectedColumnIds}
+            colorByColumnId={colorByColumnId}
+            data={data}
+            isLoading={isLoading || isLoadingDatasetDetail || isLoadingQc}
+            error={error}
+            onRangeChange={setVisibleRange}
+            onFitAll={() => setVisibleRange({ start: datasetDetail.start_time, end: datasetDetail.end_time })}
+            flaggedRanges={visibleFlaggedRanges}
+            flagMetaById={flagMetaById}
+            manualSelectionEnabled={flags.length > 0}
+            onManualRangeSelected={(range) => {
+              setManualRange(range);
+              setManualFlagId(activeFlagId ?? flags[0]?.id ?? "");
+            }}
+          />
+
+          {/* Collapsible panels below the chart */}
+          <ChannelSelector
+            columns={datasetDetail.columns}
+            selectedColumnIds={selectedColumnIds}
+            colorByColumnId={colorByColumnId}
+            onToggle={(columnId) =>
+              setSelectedColumnIds((current) => current.includes(columnId) ? current.filter((item) => item !== columnId) : [...current, columnId])
             }
-            main={
-              <>
-                <TimeSeriesControls
-                  resample={resample}
-                  appliedResample={data?.resample ?? null}
-                  start={visibleRange.start}
-                  end={visibleRange.end}
-                  onResampleChange={setResample}
-                  onRangeChange={setVisibleRange}
-                  onFitAll={() => setVisibleRange({ start: datasetDetail.start_time, end: datasetDetail.end_time })}
-                />
+            onSelectAll={() => setSelectedColumnIds(datasetDetail.columns.map((column) => column.id))}
+            onClearAll={() => setSelectedColumnIds([])}
+          />
 
-                <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-                  <ChannelSelector
-                    columns={datasetDetail.columns}
-                    selectedColumnIds={selectedColumnIds}
-                    colorByColumnId={colorByColumnId}
-                    onToggle={(columnId) =>
-                      setSelectedColumnIds((current) => current.includes(columnId) ? current.filter((item) => item !== columnId) : [...current, columnId])
-                    }
-                    onSelectAll={() => setSelectedColumnIds(datasetDetail.columns.map((column) => column.id))}
-                    onClearAll={() => setSelectedColumnIds([])}
-                  />
+          <FlagManager
+            flags={flags}
+            flaggedRanges={flaggedRanges}
+            activeFlagId={activeFlagId}
+            flagVisibility={flagVisibility}
+            isBusy={isLoadingQc}
+            onSelectFlag={(flagId) => setActiveFlagId(flagId)}
+            onToggleVisibility={(flagId) => setFlagVisibility((current) => ({ ...current, [flagId]: !(current[flagId] ?? true) }))}
+            onCreateFlag={async (payload) => {
+              if (!datasetDetail) return;
+              const created = await createFlag(datasetDetail.id, payload);
+              await refreshQcState(datasetDetail.id, created.id);
+              await refreshHistory(datasetDetail.id);
+            }}
+            onApplyRules={async (flagId) => {
+              if (!datasetDetail) return;
+              await applyFlagRules(flagId);
+              await refreshQcState(datasetDetail.id, flagId);
+              await refreshHistory(datasetDetail.id);
+              // Trigger insight about downstream impact
+              const flagName = flags.find((f) => f.id === flagId)?.name ?? "flag";
+              showQcInsight?.(`Flag rules applied for "${flagName}". Check the AI chat for downstream impact analysis.`, "info");
+            }}
+            onDeleteFlag={async (flagId) => {
+              if (!datasetDetail) return;
+              await deleteFlag(flagId);
+              await refreshQcState(datasetDetail.id, activeFlagId === flagId ? null : activeFlagId);
+              await refreshHistory(datasetDetail.id);
+            }}
+            onDeleteRange={async (rangeId) => {
+              if (!datasetDetail) return;
+              await deleteFlaggedRange(rangeId);
+              await refreshQcState(datasetDetail.id, activeFlagId);
+              await refreshHistory(datasetDetail.id);
+            }}
+          />
 
-                  <TimeSeriesChart
-                    datasetColumns={datasetDetail.columns}
-                    selectedColumnIds={selectedColumnIds}
-                    colorByColumnId={colorByColumnId}
-                    data={data}
-                    isLoading={isLoading || isLoadingDatasetDetail || isLoadingQc}
-                    error={error}
-                    onRangeChange={setVisibleRange}
-                    onFitAll={() => setVisibleRange({ start: datasetDetail.start_time, end: datasetDetail.end_time })}
-                    flaggedRanges={visibleFlaggedRanges}
-                    flagMetaById={flagMetaById}
-                    manualSelectionEnabled={flags.length > 0}
-                    onManualRangeSelected={(range) => {
-                      setManualRange(range);
-                      setManualFlagId(activeFlagId ?? flags[0]?.id ?? "");
-                    }}
-                  />
-                </section>
-              </>
-            }
+          <FlagRuleEditor
+            activeFlag={activeFlag}
+            columns={datasetDetail.columns}
+            rules={flagRules}
+            onCreateRule={async (payload) => {
+              if (!activeFlag || !datasetDetail) return;
+              await createFlagRule(activeFlag.id, payload);
+              await refreshQcState(datasetDetail.id, activeFlag.id);
+            }}
+            onUpdateRule={async (ruleId, payload) => {
+              if (!activeFlag || !datasetDetail) return;
+              const previousRules = flagRules;
+              const optimisticRules = sortRules(
+                flagRules.map((rule) =>
+                  rule.id === ruleId
+                    ? { ...rule, column_id: payload.column_id, operator: payload.operator, value: payload.value ?? null, logic: payload.logic ?? "AND", group_index: payload.group_index ?? rule.group_index, order_index: payload.order_index ?? rule.order_index }
+                    : rule,
+                ),
+              );
+              setFlagRules(optimisticRules);
+              try { await updateFlagRule(ruleId, payload); } catch (requestError) { setFlagRules(previousRules); throw requestError; }
+            }}
+            onDeleteRule={async (ruleId) => {
+              if (!activeFlag || !datasetDetail) return;
+              const previousRules = flagRules;
+              setFlagRules(flagRules.filter((rule) => rule.id !== ruleId));
+              try { await deleteFlagRule(ruleId); } catch (requestError) { setFlagRules(previousRules); throw requestError; }
+            }}
+          />
+
+          <TowerShadowDetector
+            datasetId={datasetDetail.id}
+            columns={datasetDetail.columns}
+            onApplied={async (flagId) => {
+              await refreshQcState(datasetDetail.id, flagId);
+              await refreshHistory(datasetDetail.id);
+            }}
           />
 
           <GapFillPanel
@@ -559,48 +506,90 @@ export function QCPage() {
           />
         </>
       ) : projectId && (isLoadingDatasetDetail || isLoadingDatasets) ? (
-        <section className="panel-surface p-6"><LoadingSpinner label="Loading QC workspace" /></section>
+        <div className="py-8"><LoadingSpinner label="Loading" /></div>
       ) : null}
 
       <Modal
         open={manualRange !== null}
-        title="Create manual flagged range"
-        description="Choose which flag to apply to the selected time window. Use Shift plus drag on the chart to create a different selection."
+        title="Flag selected range"
+        description=""
         onClose={() => setManualRange(null)}
       >
-        <div className="space-y-4">
-          {manualRange ? <div className="panel-muted px-4 py-4 text-sm text-ink-700">{new Date(manualRange.start).toLocaleString()} to {new Date(manualRange.end).toLocaleString()}</div> : null}
-          <label className="grid gap-2 text-sm font-medium text-ink-800">
+        <div className="space-y-3">
+          {manualRange ? <p className="text-xs text-ink-500">{new Date(manualRange.start).toLocaleString()} &mdash; {new Date(manualRange.end).toLocaleString()}</p> : null}
+          <label className="grid gap-1 text-xs font-medium text-ink-800">
             Flag
-            <select value={manualFlagId} onChange={(event) => setManualFlagId(event.target.value)} className="rounded-2xl border-ink-200 bg-white">
-              <option value="">Select a flag</option>
+            <select value={manualFlagId} onChange={(event) => setManualFlagId(event.target.value)} className="rounded-lg border-ink-200 bg-white text-sm">
+              <option value="">Select</option>
               {flags.map((flag) => <option key={flag.id} value={flag.id}>{flag.name}</option>)}
             </select>
           </label>
-          <div className="flex justify-end gap-3">
-            <button type="button" onClick={() => setManualRange(null)} className="rounded-2xl border border-ink-200 px-4 py-3 text-sm font-medium text-ink-700 transition hover:border-ink-400 hover:text-ink-900">Cancel</button>
+          <div className="flex justify-end gap-2">
+            <button type="button" onClick={() => setManualRange(null)} className="rounded-lg border border-ink-200 px-3 py-1.5 text-xs font-medium text-ink-700">Cancel</button>
             <button
               type="button"
               disabled={!manualRange || !manualFlagId || !datasetDetail}
               onClick={() => {
-                if (!manualRange || !manualFlagId || !datasetDetail) {
-                  return;
-                }
+                if (!manualRange || !manualFlagId || !datasetDetail) return;
                 void createManualFlaggedRange(manualFlagId, { start_time: manualRange.start, end_time: manualRange.end, column_ids: selectedColumnIds.length > 0 ? selectedColumnIds : undefined })
                   .then(async () => {
                     await refreshQcState(datasetDetail.id, manualFlagId);
                     await refreshHistory(datasetDetail.id);
                     setManualRange(null);
                   })
-                  .catch((requestError: unknown) => setPageError(requestError instanceof Error ? requestError.message : "Unable to create manual flagged range"));
+                  .catch((requestError: unknown) => setPageError(requestError instanceof Error ? requestError.message : "Unable to flag range"));
               }}
-              className="rounded-2xl bg-ink-900 px-4 py-3 text-sm font-medium text-white transition hover:bg-ink-700 disabled:opacity-60"
+              className="rounded-lg bg-ink-900 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
             >
-              Apply flag
+              Apply
             </button>
           </div>
         </div>
       </Modal>
+    </div>
+  );
+}
+
+/* ---------- AI Review button (hidden when AI disabled) ---------- */
+
+function AiQcButton({ projectId }: { projectId: string }) {
+  const { enabled, sendPrompt } = useAi();
+  if (!enabled || !projectId) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void sendPrompt(projectId, "Run a full QC review on this dataset. Identify icing, tower shadow, flat-lining, spikes, and any other anomalies. Suggest flagging actions with downstream impact estimates.")}
+      className="inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700 transition hover:bg-teal-100 dark:bg-teal-900/20 dark:text-teal-400"
+    >
+      <Bot className="h-3 w-3" /> AI Review
+    </button>
+  );
+}
+
+/* ---------- QC insight banners (health issues + local QC insights) ---------- */
+
+function QcInsightBanners({ projectId }: { projectId: string }) {
+  const { enabled, insights, dismissInsight, sendPrompt } = useAi();
+  if (!enabled || !projectId) return null;
+
+  const qcInsights = insights.filter(
+    (i) => i.category === "qc" || i.category === "data_quality" || i.category === "anomaly",
+  );
+  if (qcInsights.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {qcInsights.map((insight) => (
+        <InsightBanner
+          key={insight.id}
+          message={insight.message}
+          severity={insight.severity}
+          actionLabel={insight.actionLabel}
+          onAction={insight.actionPrompt ? () => void sendPrompt(projectId, insight.actionPrompt!) : undefined}
+          onDismiss={() => dismissInsight(insight.id)}
+        />
+      ))}
     </div>
   );
 }

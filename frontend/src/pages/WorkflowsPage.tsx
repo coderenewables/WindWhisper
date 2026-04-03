@@ -1,4 +1,4 @@
-import { AlertTriangle, GitBranch } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
@@ -197,45 +197,27 @@ export function WorkflowsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="panel-surface p-6 sm:p-7">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-teal-200 bg-teal-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-teal-700">
-              <GitBranch className="h-3.5 w-3.5" />
-              Workflow automation
-            </div>
-            <h1 className="mt-4 text-3xl font-semibold text-ink-900">Chain import, QC, shear, MCP, reporting, and export steps into reusable workflows</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-ink-600">
-              Save project-scoped workflow definitions, configure each step with real dataset and column selections, execute them in order, and inspect the latest execution log without leaving the workspace.
-            </p>
-          </div>
+    <div className="space-y-3">
+      {/* Compact toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-sm font-semibold text-ink-900">Workflows</h1>
+        <select value={projectId} onChange={(event) => {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set("projectId", event.target.value);
+          nextParams.delete("workflowId");
+          setSearchParams(nextParams, { replace: true });
+        }} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+          <option value="">Project</option>
+          {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+        </select>
+      </div>
 
-          <label className="grid gap-2 text-sm font-medium text-ink-800 lg:min-w-72">
-            Project
-            <select value={projectId} onChange={(event) => {
-              const nextParams = new URLSearchParams(searchParams);
-              nextParams.set("projectId", event.target.value);
-              nextParams.delete("workflowId");
-              setSearchParams(nextParams, { replace: true });
-            }} className="rounded-2xl border border-ink-200 bg-white px-3 py-2 text-sm text-ink-800">
-              <option value="">Select project</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
+      {pageError ? (
+        <div className="flex items-start gap-2 rounded-lg border border-rose-200 bg-rose-50 p-2 text-xs text-rose-800">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>{pageError}</span>
         </div>
-
-        {pageError ? (
-          <div className="mt-5 flex items-start gap-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-4 text-sm text-rose-800">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{pageError}</span>
-          </div>
-        ) : null}
-      </section>
+      ) : null}
 
       <WorkflowBuilder
         projectName={activeProject?.name ?? null}

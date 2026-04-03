@@ -23,43 +23,36 @@ export function Sidebar({ sections, collapsed, mobileOpen, onToggleCollapse, onT
       <button
         type="button"
         onClick={onToggleMobile}
-        className="fixed left-4 top-4 z-40 rounded-full border border-white/70 bg-white/90 p-3 text-ink-800 shadow-panel lg:hidden"
+        className="fixed left-3 top-3 z-40 rounded-lg border border-white/70 bg-white/90 p-2.5 text-ink-800 shadow lg:hidden"
         aria-label="Toggle navigation"
       >
-        <Menu className="h-5 w-5" />
+        <Menu className="h-4 w-4" />
       </button>
       <div
         className={[
-          "fixed inset-y-0 left-0 z-30 flex h-full flex-col overflow-hidden border-r border-white/50 bg-ink-900/95 px-4 py-5 text-white shadow-panel backdrop-blur-xl transition-[width,transform] duration-300 lg:translate-x-0",
-          collapsed ? "w-[120px]" : "w-[240px]",
+          "fixed inset-y-0 left-0 z-30 flex h-full flex-col overflow-hidden border-r border-white/10 bg-ink-900 px-3 py-4 text-white transition-[width,transform] duration-300 lg:translate-x-0",
+          collapsed ? "w-[104px]" : "w-[224px]",
           mobileOpen ? "translate-x-0" : "-translate-x-full",
         ].join(" ")}
       >
-        <div className={["mb-8 flex gap-3 px-2", collapsed ? "flex-col items-center" : "items-start justify-between"].join(" ")}>
-          <div className={["min-w-0", collapsed ? "flex flex-col items-center text-center" : "block"].join(" ")}>
-            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/10 font-mono text-sm uppercase tracking-[0.22em] text-ember-200">
+        <div className={["mb-6 flex gap-2 px-1", collapsed ? "flex-col items-center" : "items-center justify-between"].join(" ")}>
+          <div className={["min-w-0", collapsed ? "flex flex-col items-center" : "block"].join(" ")}>
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 font-mono text-xs uppercase tracking-widest text-ember-200">
               GK
             </div>
-            {collapsed ? (
-              <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-white/80">GoK</p>
-            ) : (
-              <>
-                <p className="mt-4 font-mono text-[10px] uppercase tracking-[0.32em] text-ember-300">Wind resource</p>
-                <h1 className="mt-2 text-xl font-semibold">GoKaatru</h1>
-              </>
-            )}
+            {!collapsed && <p className="mt-2 text-sm font-semibold">GoKaatru</p>}
           </div>
           <button
             type="button"
             onClick={onToggleCollapse}
-            className={["hidden rounded-full border border-white/10 bg-white/5 p-2 text-white/80 transition hover:bg-white/10 lg:inline-flex", collapsed ? "self-center" : "self-start"].join(" ")}
+            className={["hidden rounded-lg bg-white/5 p-1.5 text-white/60 transition hover:bg-white/10 lg:inline-flex", collapsed ? "self-center" : ""].join(" ")}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
-            <ChevronLeft className={collapsed ? "h-4 w-4 rotate-180" : "h-4 w-4"} />
+            <ChevronLeft className={collapsed ? "h-3.5 w-3.5 rotate-180" : "h-3.5 w-3.5"} />
           </button>
         </div>
 
-        <nav className="flex-1 space-y-2">
+        <nav className="flex-1 space-y-0.5">
           {sections.map((section) => (
             <NavLink
               key={section.path}
@@ -67,9 +60,9 @@ export function Sidebar({ sections, collapsed, mobileOpen, onToggleCollapse, onT
               onClick={onNavigate}
               className={({ isActive }) =>
                 [
-                  "group flex items-center gap-3 rounded-2xl px-3 py-3 text-sm transition",
-                  isActive ? "bg-white text-ink-900 shadow-lg" : "text-white/70 hover:bg-white/8 hover:text-white",
-                  collapsed ? "justify-center lg:px-2" : "",
+                  "group flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-xs transition",
+                  isActive ? "bg-white text-ink-900 font-medium" : "text-white/60 hover:bg-white/8 hover:text-white",
+                  collapsed ? "justify-center" : "",
                 ].join(" ")
               }
               title={collapsed ? section.title : undefined}
@@ -79,19 +72,6 @@ export function Sidebar({ sections, collapsed, mobileOpen, onToggleCollapse, onT
             </NavLink>
           ))}
         </nav>
-
-        {collapsed ? (
-          <div className="mt-6 flex justify-center px-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-[11px] font-semibold uppercase tracking-[0.2em] text-teal-200">
-              Live
-            </div>
-          </div>
-        ) : (
-          <div className="panel-muted mt-6 border-white/10 bg-white/5 p-4 text-white/75">
-            <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-teal-300">Status</p>
-            <p className="mt-2 text-sm leading-6">All workspaces are available from the main navigation.</p>
-          </div>
-        )}
       </div>
       {mobileOpen ? <button type="button" className="fixed inset-0 z-20 bg-ink-900/40 lg:hidden" onClick={onToggleMobile} aria-label="Close navigation" /> : null}
     </>

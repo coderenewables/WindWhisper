@@ -1,7 +1,9 @@
-import { Download, FileSpreadsheet } from "lucide-react";
+
+import { Bot } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
+import { useAi } from "../ai/AiProvider";
 import { listPowerCurves } from "../api/analysis";
 import { getDataset, listProjectDatasets } from "../api/datasets";
 import { listFlags } from "../api/qc";
@@ -175,61 +177,33 @@ export function ExportPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="panel-surface p-6 sm:p-7">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-ember-200 bg-ember-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-ember-700">
-              <Download className="h-3.5 w-3.5" />
-              Export workspace
-            </div>
-            <h1 className="mt-4 text-3xl font-semibold text-ink-900">Download clean CSV, WAsP TAB, IEA Task 43 JSON, and Openwind deliverables</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-ink-600">
-              Select a project dataset, apply QC exclusions, preview the generated file, and download the exact export needed for downstream analysis or data exchange.
-            </p>
-          </div>
+    <div className="space-y-3">
+      {/* Compact toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-sm font-semibold text-ink-900">Export</h1>
+        <select value={projectId} onChange={(event) => {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set("projectId", event.target.value);
+          nextParams.delete("datasetId");
+          setSearchParams(nextParams, { replace: true });
+        }} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+          <option value="">Project</option>
+          {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+        </select>
+        <select value={datasetId} onChange={(event) => {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set("projectId", projectId);
+          nextParams.set("datasetId", event.target.value);
+          setSearchParams(nextParams, { replace: true });
+        }} className="rounded-lg border-ink-200 bg-white py-1 text-xs" disabled={!projectId || datasets.length === 0}>
+          <option value="">Dataset</option>
+          {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+        </select>
+        <AiNarrativeButton projectId={projectId} />
+      </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
-              Project
-              <select value={projectId} onChange={(event) => {
-                const nextParams = new URLSearchParams(searchParams);
-                nextParams.set("projectId", event.target.value);
-                nextParams.delete("datasetId");
-                setSearchParams(nextParams, { replace: true });
-              }} className="rounded-2xl border-ink-200 bg-white">
-                <option value="">Select project</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
-              Dataset
-              <select value={datasetId} onChange={(event) => {
-                const nextParams = new URLSearchParams(searchParams);
-                nextParams.set("projectId", projectId);
-                nextParams.set("datasetId", event.target.value);
-                setSearchParams(nextParams, { replace: true });
-              }} className="rounded-2xl border-ink-200 bg-white">
-                <option value="">Select dataset</option>
-                {datasets.map((dataset) => (
-                  <option key={dataset.id} value={dataset.id}>{dataset.name}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-
-        {pageError ? <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{pageError}</div> : null}
-
-        {!datasetDetail && !pageError ? (
-          <div className="mt-5 rounded-[28px] border border-dashed border-ink-200 px-5 py-10 text-sm text-ink-600">
-            Choose a project and dataset to configure export outputs. The preview panel becomes available as soon as a dataset is selected.
-          </div>
-        ) : null}
-      </section>
+      {pageError ? <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">{pageError}</div> : null}
+      {!datasetDetail && !pageError ? <p className="py-6 text-center text-xs text-ink-400">Select a project and dataset to export.</p> : null}
 
       {datasetDetail ? <ExportWizard datasetDetail={datasetDetail} flags={flags} /> : null}
 
@@ -243,14 +217,23 @@ export function ExportPage() {
         />
       ) : null}
 
-      {datasetDetail ? (
-        <section className="panel-muted flex items-start gap-3 p-5 text-sm text-ink-700">
-          <FileSpreadsheet className="mt-0.5 h-4 w-4 text-teal-600" />
-          <p>
-            CSV, Openwind, and IEA JSON exports can include any selected dataset columns. WAsP TAB export requires one wind speed column and one wind direction column from the same dataset. Report generation now uses the selected dataset, explicit report input columns, and the chosen power curve before applying QC exclusions and calculating figures.
-          </p>
-        </section>
-      ) : null}
     </div>
+  );
+}
+
+/* ---------- AI Narrative button (hidden when AI disabled) ---------- */
+
+function AiNarrativeButton({ projectId }: { projectId: string }) {
+  const { enabled, sendPrompt } = useAi();
+  if (!enabled || !projectId) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void sendPrompt(projectId, "Generate a narrative report for this project. Include an executive summary, data overview, QC summary, analysis results, and recommendations. Use a technical due-diligence tone.")}
+      className="ml-auto inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700 transition hover:bg-teal-100 dark:bg-teal-900/20 dark:text-teal-400"
+    >
+      <Bot className="h-3 w-3" /> AI Narrative
+    </button>
   );
 }

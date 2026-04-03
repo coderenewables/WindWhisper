@@ -1,9 +1,14 @@
-import { Menu, MoonStar, PanelLeftClose, PanelLeftOpen, SunMedium } from "lucide-react";
+import { Bot, Menu, MoonStar, PanelLeftClose, PanelLeftOpen, Search, SunMedium } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
+
+import { useAi } from "../../ai/AiProvider";
+import { useAiStore } from "../../stores/aiStore";
 
 interface TopBarProps {
   darkMode: boolean;
   sidebarCollapsed: boolean;
+  aiEnabled?: boolean;
+  aiConnected?: boolean;
   onToggleDarkMode: () => void;
   onToggleSidebar: () => void;
   onToggleMobileNavigation: () => void;
@@ -16,17 +21,19 @@ function humanize(segment: string) {
     .join(" ");
 }
 
-export function TopBar({ darkMode, sidebarCollapsed, onToggleDarkMode, onToggleSidebar, onToggleMobileNavigation }: TopBarProps) {
+export function TopBar({ darkMode, sidebarCollapsed, aiEnabled, aiConnected, onToggleDarkMode, onToggleSidebar, onToggleMobileNavigation }: TopBarProps) {
   const location = useLocation();
   const segments = location.pathname.split("/").filter(Boolean);
+  const { toggleChat, chatOpen } = useAiStore();
+  const { pendingCount } = useAi();
 
   return (
-    <header className="panel-surface sticky top-4 z-10 mb-6 flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-center sm:justify-between lg:px-6">
-      <div className="flex items-start gap-3">
+    <header className="sticky top-2 z-10 mb-4 flex items-center justify-between rounded-xl border border-ink-100 bg-white/80 px-3 py-2 backdrop-blur dark:border-ink-700 dark:bg-ink-800/80">
+      <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={onToggleMobileNavigation}
-          className="inline-flex rounded-full border border-ink-200 bg-white p-2.5 text-ink-700 transition hover:border-ink-400 hover:text-ink-900 lg:hidden"
+          className="rounded-lg p-1.5 text-ink-500 transition hover:bg-ink-100 hover:text-ink-900 lg:hidden"
           aria-label="Open navigation"
         >
           <Menu className="h-4 w-4" />
@@ -34,40 +41,67 @@ export function TopBar({ darkMode, sidebarCollapsed, onToggleDarkMode, onToggleS
         <button
           type="button"
           onClick={onToggleSidebar}
-          className="hidden rounded-full border border-ink-200 bg-white p-2.5 text-ink-700 transition hover:border-ink-400 hover:text-ink-900 lg:inline-flex"
+          className="hidden rounded-lg p-1.5 text-ink-500 transition hover:bg-ink-100 hover:text-ink-900 lg:inline-flex"
           aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {sidebarCollapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
         </button>
 
-        <div>
-          <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-ember-500">GoKaatru</p>
-          <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-500">
-            <Link to="/" className="font-medium text-ink-700 transition hover:text-ink-900">
-              Dashboard
-            </Link>
-            {segments.map((segment, index) => {
-              const path = `/${segments.slice(0, index + 1).join("/")}`;
-              return (
-                <span key={path} className="flex items-center gap-2">
-                  <span className="text-ink-300">/</span>
-                  <Link to={path} className="transition hover:text-ink-900">
-                    {humanize(segment)}
-                  </Link>
-                </span>
-              );
-            })}
-          </div>
-        </div>
+        <nav className="flex items-center gap-1 text-xs text-ink-500">
+          <Link to="/" className="font-medium text-ink-600 transition hover:text-ink-900">Home</Link>
+          {segments.map((segment, index) => {
+            const path = `/${segments.slice(0, index + 1).join("/")}`;
+            return (
+              <span key={path} className="flex items-center gap-1">
+                <span className="text-ink-300">/</span>
+                <Link to={path} className="transition hover:text-ink-900">{humanize(segment)}</Link>
+              </span>
+            );
+          })}
+        </nav>
       </div>
-      <div className="flex items-center gap-3 self-start sm:self-auto">
-        <div className="rounded-full border border-ink-200 bg-white px-4 py-2 font-mono text-xs uppercase tracking-[0.26em] text-ink-500">
-          Foundation
-        </div>
+
+      <div className="flex items-center gap-1.5">
+        {/* AI status indicator */}
+        {aiEnabled && (
+          <span className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] text-ink-400">
+            <span className={`h-1.5 w-1.5 rounded-full ${aiConnected ? "bg-green-500" : "bg-ink-300"}`} />
+            AI
+          </span>
+        )}
+
+        {/* Command bar trigger */}
+        <button
+          type="button"
+          onClick={toggleChat}
+          className="rounded-lg p-1.5 text-ink-500 transition hover:bg-ink-100 hover:text-ink-900"
+          title="Search (Ctrl+K)"
+        >
+          <Search className="h-4 w-4" />
+        </button>
+
+        {/* AI chat toggle with pending badge */}
+        <button
+          type="button"
+          onClick={toggleChat}
+          className={`relative rounded-lg p-1.5 transition ${
+            chatOpen
+              ? "bg-teal-50 text-teal-600 dark:bg-teal-900/20 dark:text-teal-400"
+              : "text-ink-500 hover:bg-ink-100 hover:text-ink-900"
+          }`}
+          title="Toggle AI (Ctrl+K)"
+        >
+          <Bot className="h-4 w-4" />
+          {pendingCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 w-3.5 items-center justify-center rounded-full bg-amber-500 text-[9px] font-bold text-white">
+              {pendingCount > 9 ? "9+" : pendingCount}
+            </span>
+          )}
+        </button>
         <button
           type="button"
           onClick={onToggleDarkMode}
-          className="rounded-full border border-ink-200 bg-white p-2.5 text-ink-700 transition hover:border-ink-400 hover:text-ink-900"
+          className="rounded-lg p-1.5 text-ink-500 transition hover:bg-ink-100 hover:text-ink-900"
           aria-label="Toggle dark mode"
         >
           {darkMode ? <SunMedium className="h-4 w-4" /> : <MoonStar className="h-4 w-4" />}

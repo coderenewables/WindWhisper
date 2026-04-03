@@ -1,7 +1,8 @@
-import { AlertTriangle, Gauge, UploadCloud } from "lucide-react";
+import { AlertTriangle, Bot, UploadCloud } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { useAi } from "../ai/AiProvider";
 import { createPowerCurve, deletePowerCurve, getEnergyEstimate, listPowerCurves, updatePowerCurve, uploadPowerCurve } from "../api/analysis";
 import { getDataset, listProjectDatasets } from "../api/datasets";
 import { listFlags } from "../api/qc";
@@ -366,79 +367,34 @@ export function EnergyPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="panel-surface p-6 sm:p-7">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-ember-200 bg-ember-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.28em] text-ember-700">
-              <Gauge className="h-3.5 w-3.5" />
-              Energy workspace
-            </div>
-            <h1 className="mt-4 text-3xl font-semibold text-ink-900">Power curve editing and annual gross energy estimates</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-7 text-ink-600">
-              Build a turbine curve from CSV or manual points, then estimate annual energy, capacity factor, and monthly contributions from any measured wind speed channel.
-            </p>
-          </div>
+    <div className="space-y-3">
+      {/* Compact toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-sm font-semibold text-ink-900">Energy</h1>
+        <select value={projectId} onChange={(event) => {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set("projectId", event.target.value);
+          nextParams.delete("datasetId");
+          setSearchParams(nextParams, { replace: true });
+        }} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+          <option value="">Project</option>
+          {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+        </select>
+        <select value={datasetId} onChange={(event) => {
+          const nextParams = new URLSearchParams(searchParams);
+          nextParams.set("projectId", projectId);
+          nextParams.set("datasetId", event.target.value);
+          setSearchParams(nextParams, { replace: true });
+        }} className="rounded-lg border-ink-200 bg-white py-1 text-xs" disabled={!projectId || datasets.length === 0}>
+          <option value="">Dataset</option>
+          {datasets.map((dataset) => <option key={dataset.id} value={dataset.id}>{dataset.name}</option>)}
+        </select>
+        {datasetId ? <span className="text-[11px] text-ink-400">{speedColumns.length} speed ch · {flags.length} flags</span> : null}
+        <AiEnergyButton projectId={projectId} />
+      </div>
 
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
-              Project
-              <select value={projectId} onChange={(event) => {
-                const nextParams = new URLSearchParams(searchParams);
-                nextParams.set("projectId", event.target.value);
-                nextParams.delete("datasetId");
-                setSearchParams(nextParams, { replace: true });
-              }} className="rounded-2xl border-ink-200 bg-white">
-                <option value="">Select project</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>{project.name}</option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-2 text-sm font-medium text-ink-800">
-              Dataset
-              <select value={datasetId} onChange={(event) => {
-                const nextParams = new URLSearchParams(searchParams);
-                nextParams.set("projectId", projectId);
-                nextParams.set("datasetId", event.target.value);
-                setSearchParams(nextParams, { replace: true });
-              }} className="rounded-2xl border-ink-200 bg-white">
-                <option value="">Select dataset</option>
-                {datasets.map((dataset) => (
-                  <option key={dataset.id} value={dataset.id}>{dataset.name}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-
-        {pageError ? <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 px-4 py-4 text-sm text-red-700">{pageError}</div> : null}
-
-        {!datasetId && !pageError ? (
-          <div className="mt-5 rounded-[28px] border border-dashed border-ink-200 px-5 py-10 text-sm text-ink-600">
-            Choose a project and dataset to start the energy workflow.
-          </div>
-        ) : null}
-
-        {datasetId ? (
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            <div className="panel-muted px-4 py-4">
-              <div className="text-sm font-medium text-ink-700">Dataset</div>
-              <div className="mt-2 text-lg font-semibold text-ink-900">{datasetName || "Selected dataset"}</div>
-            </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="text-sm font-medium text-ink-700">Available speed channels</div>
-              <div className="mt-2 text-lg font-semibold text-ink-900">{speedColumns.length}</div>
-            </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="text-sm font-medium text-ink-700">QC flags</div>
-              <div className="mt-2 text-lg font-semibold text-ink-900">{isLoadingFlags ? "..." : flags.length}</div>
-            </div>
-          </div>
-        ) : null}
-      </section>
-
+      {pageError ? <div className="rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-700">{pageError}</div> : null}
+      {!datasetId && !pageError ? <p className="py-6 text-center text-xs text-ink-400">Select a project and dataset.</p> : null}
       {datasetId ? (
         <>
           <PowerCurveEditor
@@ -515,5 +471,22 @@ export function EnergyPage() {
         </section>
       )}
     </div>
+  );
+}
+
+/* ---------- AI Run Scenarios button (hidden when AI disabled) ---------- */
+
+function AiEnergyButton({ projectId }: { projectId: string }) {
+  const { enabled, sendPrompt } = useAi();
+  if (!enabled || !projectId) return null;
+
+  return (
+    <button
+      type="button"
+      onClick={() => void sendPrompt(projectId, "Run multiple energy scenarios for this project. Compare different hub heights, power curves, and MCP methods. Show which input has the largest effect on yield uncertainty.")}
+      className="ml-auto inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700 transition hover:bg-teal-100 dark:bg-teal-900/20 dark:text-teal-400"
+    >
+      <Bot className="h-3 w-3" /> Run Scenarios
+    </button>
   );
 }

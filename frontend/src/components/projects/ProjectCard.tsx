@@ -18,7 +18,7 @@ function formatLocation(project: Project) {
 export function ProjectCard({ project }: ProjectCardProps) {
   return (
     <Link
-      to={`/project/${project.id}`}
+      to={`/workspace/${project.id}`}
       className="group panel-surface block overflow-hidden p-5 transition duration-300 hover:-translate-y-1 hover:border-ember-300/70"
     >
       <div className="flex items-start justify-between gap-4">

@@ -71,3 +71,7 @@ app.include_router(mcp_router)
 app.include_router(export_router)
 app.include_router(reports_router)
 app.include_router(workflows_router)
+
+# Always register AI router — individual endpoints check settings.ai_enabled at runtime
+from app.ai.router import router as ai_router
+app.include_router(ai_router)

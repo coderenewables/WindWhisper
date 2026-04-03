@@ -18,6 +18,14 @@ class Settings(BaseSettings):
         alias="CORS_ORIGINS",
     )
 
+    # AI settings
+    ai_enabled: bool = Field(default=True, alias="AI_ENABLED")
+    llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    llm_model: str = Field(default="gpt-4o-mini", alias="LLM_MODEL")
+    llm_base_url: str | None = Field(default=None, alias="LLM_BASE_URL")
+    ai_max_tokens_per_request: int = Field(default=4096, alias="AI_MAX_TOKENS_PER_REQUEST")
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

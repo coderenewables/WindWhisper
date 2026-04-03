@@ -1,7 +1,9 @@
-import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Database, FileUp } from "lucide-react";
+import { AlertTriangle, ArrowRight, Bot, CheckCircle2, FileUp } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
+import { useAi } from "../ai/AiProvider";
+import { InsightBanner } from "../components/ai/InsightBanner";
 import { FileUploader } from "../components/import/FileUploader";
 import { ColumnMapper } from "../components/import/ColumnMapper";
 import { ImportPreview } from "../components/import/ImportPreview";
@@ -25,6 +27,7 @@ export function ImportPage() {
   const [editableColumns, setEditableColumns] = useState<ColumnInfo[]>([]);
   const [defaultColumns, setDefaultColumns] = useState<ColumnInfo[]>([]);
   const [datasetName, setDatasetName] = useState("");
+  const [importInsight, setImportInsight] = useState<string | null>(null);
   const { projects, fetchProjects, fetchProject } = useProjectStore();
   const {
     uploadPreview,
@@ -40,6 +43,7 @@ export function ImportPage() {
     clearUploadPreview,
     confirmImport,
   } = useDatasetStore();
+  const { sendPrompt } = useAi();
 
   const activeProjectId = selectedProjectId ?? initialProjectId;
   const selectedProject = projects.find((project) => project.id === activeProjectId) ?? null;
@@ -62,6 +66,14 @@ export function ImportPage() {
       setEditableColumns(uploadPreview.columns);
       setDatasetName(buildDatasetName(uploadPreview.file_name));
       setStep(2);
+      // Check for potential issues to surface as insight
+      const unmapped = uploadPreview.columns.filter((col) => col.measurement_type === null).length;
+      const total = uploadPreview.columns.length;
+      if (unmapped > 0 && unmapped >= total / 2) {
+        setImportInsight(`${unmapped} of ${total} columns have no detected measurement type. AI can help identify the correct mappings.`);
+      } else {
+        setImportInsight(null);
+      }
     }
   }, [uploadPreview]);
 
@@ -110,103 +122,36 @@ export function ImportPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(320px,0.9fr)] xl:items-end">
-          <div>
-            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
-              Import: upload and map raw measurement files.
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
-              Upload files, confirm channel mapping, and save datasets to a project.
-            </p>
-          </div>
+    <div className="space-y-3">
+      {/* Compact toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-sm font-semibold text-ink-900">Import</h1>
+        <select value={activeProjectId ?? ""} onChange={(event) => handleProjectChange(event.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+          <option value="">Project</option>
+          {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+        </select>
+        {selectedProject ? <span className="text-[11px] text-ink-400">{selectedProject.dataset_count} dataset(s)</span> : null}
+      </div>
 
-          <div className="panel-muted p-3 text-sm">
-            <label className="grid gap-1 text-xs font-medium text-ink-800">
-              Target project
-              <div className="relative">
-                <select
-                  value={activeProjectId ?? ""}
-                  onChange={(event) => handleProjectChange(event.target.value)}
-                  className="w-full appearance-none rounded-2xl border-ink-200 bg-white px-4 py-3 pr-10"
-                >
-                  <option value="">Select a project</option>
-                  {projects.map((project) => (
-                    <option key={project.id} value={project.id}>
-                      {project.name}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-500" />
-              </div>
-            </label>
-            <div className="mt-4 rounded-2xl border border-ink-100 bg-white/60 px-4 py-4 text-sm text-ink-700">
-              {selectedProject ? (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 font-medium text-ink-900">
-                    <Database className="h-4 w-4 text-teal-500" />
-                    <span>{selectedProject.name}</span>
-                  </div>
-                  <p>{selectedProject.dataset_count} dataset(s) currently attached.</p>
-                </div>
-              ) : (
-                <p>Choose a project before starting the upload.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="grid gap-4 lg:grid-cols-3">
+      {/* Compact step indicator */}
+      <div className="flex gap-1">
         {[
           { id: 1, label: "Upload", icon: FileUp },
-          { id: 2, label: "Map columns", icon: ArrowRight },
+          { id: 2, label: "Map", icon: ArrowRight },
           { id: 3, label: "Confirm", icon: CheckCircle2 },
         ].map((item) => {
           const active = step === item.id;
           const complete = step > item.id;
           return (
-            <div
-              key={item.id}
-              className={[
-                "rounded-3xl border px-5 py-4 transition",
-                active ? "border-teal-400 bg-teal-50/70" : "border-white/70 bg-white/60",
-              ].join(" ")}
-            >
-              <div className="flex items-center gap-3">
-                <div
-                  className={[
-                    "flex h-10 w-10 items-center justify-center rounded-full",
-                    complete ? "bg-ink-900 text-white" : active ? "bg-teal-500 text-white" : "bg-white text-ink-500",
-                  ].join(" ")}
-                >
-                  <item.icon className="h-4 w-4" />
-                </div>
-                <div>
-                  <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-ink-500">Step {item.id}</p>
-                  <p className="text-sm font-medium text-ink-900">{item.label}</p>
-                </div>
-              </div>
+            <div key={item.id} className={["flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition", complete ? "bg-ink-900 text-white" : active ? "bg-teal-500 text-white" : "bg-ink-50 text-ink-400"].join(" ")}>
+              <item.icon className="h-3 w-3" />
+              {item.label}
             </div>
           );
         })}
-      </section>
+      </div>
 
-      {!activeProjectId ? (
-        <section className="panel-surface p-8">
-          <div className="flex items-start gap-3 text-sm text-ink-700">
-            <AlertTriangle className="mt-0.5 h-5 w-5 text-ember-500" />
-            <div>
-              <h2 className="text-xl font-semibold text-ink-900">Project selection is required</h2>
-              <p className="mt-2 max-w-2xl leading-7 text-ink-600">
-                Select an existing project to route the import into the correct campaign workspace. If you need one,
-                create it from the dashboard first.
-              </p>
-            </div>
-          </div>
-        </section>
-      ) : null}
+      {!activeProjectId ? <p className="py-6 text-center text-xs text-ink-400">Select a project to start importing.</p> : null}
 
       {error ? (
         <div className="panel-surface flex items-start gap-3 border border-red-200 bg-red-50/80 p-4 text-sm text-red-700">
@@ -220,16 +165,28 @@ export function ImportPage() {
       ) : null}
 
       {activeProjectId && step === 2 && uploadPreview ? (
-        <ColumnMapper
-          columns={editableColumns}
-          defaultColumns={defaultColumns}
-          onChange={setEditableColumns}
-          onBack={() => {
-            clearUploadPreview();
-            setStep(1);
-          }}
-          onContinue={() => setStep(3)}
-        />
+        <>
+          {importInsight ? (
+            <InsightBanner
+              message={importInsight}
+              severity="warning"
+              actionLabel="AI Suggest"
+              onAction={() => { void sendPrompt(activeProjectId, `Review the column mapping for the uploaded file "${uploadPreview.file_name}". Check for naming convention issues, incorrect measurement types, missing sensor heights, and suggest corrections.`); setImportInsight(null); }}
+              onDismiss={() => setImportInsight(null)}
+            />
+          ) : null}
+          <AiImportSuggest projectId={activeProjectId} fileName={uploadPreview.file_name} />
+          <ColumnMapper
+            columns={editableColumns}
+            defaultColumns={defaultColumns}
+            onChange={setEditableColumns}
+            onBack={() => {
+              clearUploadPreview();
+              setStep(1);
+            }}
+            onContinue={() => setStep(3)}
+          />
+        </>
       ) : null}
 
       {activeProjectId && step === 3 && uploadPreview ? (
@@ -245,21 +202,33 @@ export function ImportPage() {
       ) : null}
 
       {activeProjectId && uploadPreview ? (
-        <section className="grid gap-4 lg:grid-cols-3">
-          <div className="panel-muted px-4 py-4">
-            <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-teal-500">Detected file</p>
-            <p className="mt-2 text-lg font-semibold text-ink-900">{uploadPreview.file_name}</p>
-          </div>
-          <div className="panel-muted px-4 py-4">
-            <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-teal-500">Included channels</p>
-            <p className="mt-2 text-lg font-semibold text-ink-900">{includedCount}</p>
-          </div>
-          <div className="panel-muted px-4 py-4">
-            <p className="font-mono text-[11px] uppercase tracking-[0.26em] text-teal-500">Preview rows</p>
-            <p className="mt-2 text-lg font-semibold text-ink-900">{uploadPreview.preview_rows.length}</p>
-          </div>
-        </section>
+        <div className="flex flex-wrap items-center gap-3 text-[11px] text-ink-500">
+          <span>{uploadPreview.file_name}</span>
+          <span>{includedCount} channels</span>
+          <span>{uploadPreview.preview_rows.length} preview rows</span>
+        </div>
       ) : null}
+    </div>
+  );
+}
+
+/* ---------- AI Suggest button for column mapping (hidden when AI disabled) ---------- */
+
+function AiImportSuggest({ projectId, fileName }: { projectId: string; fileName: string }) {
+  const { enabled, sendPrompt } = useAi();
+  if (!enabled) return null;
+
+  return (
+    <div className="flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50/50 px-3 py-2 dark:border-teal-800 dark:bg-teal-900/10">
+      <Bot className="h-3.5 w-3.5 text-teal-600" />
+      <span className="flex-1 text-xs text-ink-600 dark:text-ink-300">AI can review detected columns and suggest corrections.</span>
+      <button
+        type="button"
+        onClick={() => void sendPrompt(projectId, `Review the column mapping for the uploaded file "${fileName}". Check for naming convention issues, incorrect measurement types, missing sensor heights, and suggest corrections.`)}
+        className="rounded-lg bg-teal-600 px-2.5 py-1 text-[11px] font-medium text-white transition hover:bg-teal-700"
+      >
+        AI Suggest
+      </button>
     </div>
   );
 }

@@ -1,10 +1,12 @@
-import { AlertTriangle, BarChart3, Compass, GaugeCircle, ShieldCheck, Wind } from "lucide-react";
+import { AlertTriangle, Bot } from "lucide-react";
 import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
+import { useAi } from "../ai/AiProvider";
 import { createExtrapolatedChannel, getAirDensityAnalysis, getExtremeWindAnalysis, getHistogramAnalysis, getProfileAnalysis, getScatterAnalysis, getShearAnalysis, getTurbulenceAnalysis, getWeibullAnalysis, getWindRoseAnalysis } from "../api/analysis";
 import { AirDensityPanel } from "../components/analysis/AirDensityPanel";
 import { ExtremeWindPanel } from "../components/analysis/ExtremeWindPanel";
+import { InsightBanner } from "../components/ai/InsightBanner";
 import { FrequencyHistogram } from "../components/analysis/FrequencyHistogram";
 import { ProfilePlots } from "../components/analysis/ProfilePlots";
 import { TurbulencePanel } from "../components/analysis/TurbulencePanel";
@@ -51,16 +53,6 @@ function getDefaultValueColumn(columns: DatasetColumn[]) {
 
 function isValidColumn(columns: DatasetColumn[], columnId: string) {
   return columns.some((column) => column.id === columnId);
-}
-
-function PlaceholderPanel({ title, description }: { title: string; description: string }) {
-  return (
-    <section className="panel-surface p-8">
-      <span className="font-mono text-xs uppercase tracking-[0.3em] text-ember-500">Queued next</span>
-      <h2 className="mt-4 text-3xl font-semibold text-ink-900">{title}</h2>
-      <p className="mt-3 max-w-2xl text-sm leading-7 text-ink-600">{description}</p>
-    </section>
-  );
 }
 
 export function AnalysisPage() {
@@ -772,755 +764,312 @@ export function AnalysisPage() {
     }
   }
 
+  /* ---- Shared QC flag exclusion toggle helper rendered inline ---- */
+  function renderFlagToggles() {
+    if (isLoadingFlags) return <span className="text-[11px] text-ink-400">Loading flags…</span>;
+    if (flags.length === 0) return null;
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {flags.map((flag) => {
+          const excluded = excludedFlagIds.includes(flag.id);
+          return (
+            <label key={flag.id} className="flex items-center gap-1.5 text-[11px] text-ink-600">
+              <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
+              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
+              {flag.name}
+            </label>
+          );
+        })}
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.95fr)] xl:items-end">
-          <div>
-            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
-              Analysis: wind rose, distributions, shear, turbulence, density, and extremes.
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
-              Select a dataset and explore directional and statistical analyses using cleaned data.
-            </p>
-          </div>
-
-          <div className="panel-muted grid gap-3 p-3 sm:grid-cols-2 text-sm">
-            <label className="grid gap-1 text-xs font-medium text-ink-800">
-              Project
-              <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-2xl border-ink-200 bg-white">
-                <option value="">Select a project</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-1 text-xs font-medium text-ink-800">
-              Dataset
-              <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-2xl border-ink-200 bg-white" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
-                <option value="">Select a dataset</option>
-                {datasets.map((dataset) => (
-                  <option key={dataset.id} value={dataset.id}>
-                    {dataset.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-      </section>
-
-      {!projectId ? <section className="panel-surface p-8 text-sm text-ink-600">Choose a project to start the analysis workflow.</section> : null}
+    <div className="space-y-3">
+      {/* Compact toolbar */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-sm font-semibold text-ink-900">Analysis</h1>
+        <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+          <option value="">Project</option>
+          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-lg border-ink-200 bg-white py-1 text-xs" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
+          <option value="">Dataset</option>
+          {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        <AiAnalysisButtons projectId={projectId} activeTab={activeTab} />
+      </div>
 
       {pageError ? (
-        <section className="panel-surface flex items-start gap-3 border border-red-200 bg-red-50/80 p-4 text-sm text-red-700">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50/80 p-2 text-xs text-red-700">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>{pageError}</span>
-        </section>
+        </div>
       ) : null}
 
-      {projectId && isLoadingDatasets ? (
-        <section className="panel-surface p-6">
-          <LoadingSpinner label="Loading datasets" />
-        </section>
-      ) : null}
-
+      {!projectId ? <p className="py-8 text-center text-xs text-ink-400">Select a project to begin.</p> : null}
+      {projectId && isLoadingDatasets ? <div className="py-8"><LoadingSpinner label="Loading datasets" /></div> : null}
       {projectId && !isLoadingDatasets && datasets.length === 0 ? (
-        <section className="panel-surface p-8">
-          <h2 className="text-2xl font-semibold text-ink-900">No datasets available</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-ink-600">Import data into this project before using the analysis workspace.</p>
-          <Link to={`/import?projectId=${projectId}`} className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-ember-500 px-5 py-3 text-sm font-medium text-white transition hover:bg-ember-400">
-            Import dataset
-          </Link>
-        </section>
+        <div className="flex flex-col items-center py-8 text-center">
+          <p className="text-xs text-ink-500">No datasets.</p>
+          <Link to={`/import?projectId=${projectId}`} className="mt-3 text-xs font-medium text-ember-500 hover:underline">Import</Link>
+        </div>
       ) : null}
 
       {datasetDetail && !isLoadingDatasetDetail ? (
         <>
-          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700"><BarChart3 className="h-4 w-4 text-teal-500" />Dataset</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{datasetDetail.name}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">{activeProject?.name ?? "Active project"}</p>
+          {/* Tab bar */}
+          <div className="flex flex-wrap gap-1 border-b border-ink-100 pb-1">
+            {analysisTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTab(tab.id)}
+                className={[
+                  "rounded-lg px-3 py-1.5 text-xs font-medium transition",
+                  activeTab === tab.id ? "bg-ink-900 text-white" : "text-ink-500 hover:bg-ink-100 hover:text-ink-900",
+                ].join(" ")}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* AI insight banners for analysis results */}
+          <AnalysisInsightBanners projectId={projectId} />
+
+          {/* ===== Wind Rose ===== */}
+          {activeTab === "wind-rose" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={selectedDirectionColumnId} onChange={(e) => setSelectedDirectionColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs" disabled={directionColumns.length === 0}>
+                  <option value="">Direction</option>
+                  {directionColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={selectedValueColumnId} onChange={(e) => setSelectedValueColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs" disabled={valueColumns.length === 0}>
+                  <option value="">Value</option>
+                  {valueColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={numSectors} onChange={(e) => setNumSectors(Number(e.target.value) as 12 | 16 | 36)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value={12}>12 sec</option>
+                  <option value={16}>16 sec</option>
+                  <option value={36}>36 sec</option>
+                </select>
+                {renderFlagToggles()}
+              </div>
+              {!selectedDirectionColumnId || !selectedValueColumnId
+                ? <p className="py-6 text-center text-xs text-ink-400">Select direction and value columns.</p>
+                : <WindRoseChart data={roseData} isLoading={isLoadingWindRose} error={windRoseError} />}
             </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700"><Compass className="h-4 w-4 text-teal-500" />Direction channels</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{directionColumns.length}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Available directional references for the wind rose.</p>
+          )}
+
+          {/* ===== Histogram ===== */}
+          {activeTab === "histogram" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={selectedHistogramColumnId} onChange={(e) => setSelectedHistogramColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Column</option>
+                  {histogramColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <input type="number" min={1} max={200} value={histogramBins} onChange={(e) => setHistogramBins(Math.max(1, Math.min(200, Number(e.target.value) || 1)))} className="w-16 rounded-lg border-ink-200 bg-white py-1 text-xs" placeholder="Bins" />
+                <input type="number" min={0} step="any" value={histogramBinWidth} onChange={(e) => setHistogramBinWidth(e.target.value)} placeholder="Bin width" className="w-20 rounded-lg border-ink-200 bg-white py-1 text-xs" />
+                {renderFlagToggles()}
+              </div>
+              {!selectedHistogramColumnId
+                ? <p className="py-6 text-center text-xs text-ink-400">Select a column.</p>
+                : <FrequencyHistogram data={histogramData} isLoading={isLoadingHistogram} error={histogramError} columnLabel={histogramColumnLabel} isWeibullAvailable={isWeibullAvailable} showWeibullFit={showWeibullFit} onToggleWeibullFit={setShowWeibullFit} weibullMethod={weibullMethod} onChangeWeibullMethod={setWeibullMethod} weibullData={weibullData} isLoadingWeibull={isLoadingWeibull} weibullError={weibullError} />}
             </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700"><GaugeCircle className="h-4 w-4 text-teal-500" />Value channels</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{valueColumns.length}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Numeric channels available for mean and energy metrics.</p>
+          )}
+
+          {/* ===== Shear ===== */}
+          {activeTab === "shear" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={selectedShearDirectionColumnId} onChange={(e) => setSelectedShearDirectionColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">No dir grouping</option>
+                  {directionColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <span className="text-[11px] text-ink-400">{shearSpeedColumns.length} heights</span>
+                {renderFlagToggles()}
+              </div>
+              {shearSpeedColumns.length < 2
+                ? <p className="py-6 text-center text-xs text-ink-400">Need 2+ speed columns at different heights.</p>
+                : <WindShearPanel data={shearData} isLoading={isLoadingShear} error={shearError} method={shearMethod} targetHeight={shearTargetHeight} onTargetHeightChange={setShearTargetHeight} onMethodChange={setShearMethod} onCreateChannel={handleCreateExtrapolatedChannel} isCreatingChannel={isCreatingExtrapolatedChannel} createChannelError={createChannelError} createdChannelName={createdChannelName} />}
             </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700"><ShieldCheck className="h-4 w-4 text-teal-500" />QC flags</div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{flags.length}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Toggle exclusions to compare raw and clean directional distributions.</p>
+          )}
+
+          {/* ===== Turbulence ===== */}
+          {activeTab === "turbulence" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={selectedTurbulenceSpeedColumnId} onChange={(e) => setSelectedTurbulenceSpeedColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Speed</option>
+                  {turbulenceSpeedColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={selectedTurbulenceSdColumnId} onChange={(e) => setSelectedTurbulenceSdColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">SD / TI</option>
+                  {turbulenceSdColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={selectedTurbulenceDirectionColumnId} onChange={(e) => setSelectedTurbulenceDirectionColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">No dir</option>
+                  {directionColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <input type="number" min={0.1} step={0.1} value={turbulenceBinWidth} onChange={(e) => setTurbulenceBinWidth(e.target.value)} className="w-16 rounded-lg border-ink-200 bg-white py-1 text-xs" placeholder="Bin" />
+                {renderFlagToggles()}
+              </div>
+              {!selectedTurbulenceSpeedColumnId || !selectedTurbulenceSdColumnId
+                ? <p className="py-6 text-center text-xs text-ink-400">Select speed and SD/TI columns.</p>
+                : <TurbulencePanel data={turbulenceData} isLoading={isLoadingTurbulence} error={turbulenceError} />}
             </div>
-          </section>
+          )}
 
-          <section className="panel-surface p-3 sm:p-4">
-            <div className="flex flex-wrap gap-2">
-              {analysisTabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  type="button"
-                  onClick={() => setActiveTab(tab.id)}
-                  className={[
-                    "rounded-2xl px-4 py-3 text-sm font-medium transition",
-                    activeTab === tab.id ? "bg-ink-900 text-white shadow-panel" : "text-ink-600 hover:bg-ink-100 hover:text-ink-900",
-                  ].join(" ")}
-                >
-                  {tab.label}
-                </button>
-              ))}
+          {/* ===== Air Density ===== */}
+          {activeTab === "air-density" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={selectedAirTemperatureColumnId} onChange={(e) => setSelectedAirTemperatureColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Temp</option>
+                  {temperatureColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={selectedAirSpeedColumnId} onChange={(e) => setSelectedAirSpeedColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Speed</option>
+                  {turbulenceSpeedColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={airPressureSource} onChange={(e) => setAirPressureSource(e.target.value as AirDensityPressureSource)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="auto">Auto</option>
+                  <option value="measured">Measured</option>
+                  <option value="estimated">Estimated</option>
+                </select>
+                <select value={selectedAirPressureColumnId} onChange={(e) => setSelectedAirPressureColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs" disabled={pressureColumns.length === 0 || airPressureSource === "estimated"}>
+                  <option value="">Pressure</option>
+                  {pressureColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <input type="number" step="1" value={airElevation} onChange={(e) => setAirElevation(e.target.value)} placeholder={activeProject?.elevation != null ? `${activeProject.elevation}m` : "Elev"} className="w-16 rounded-lg border-ink-200 bg-white py-1 text-xs" />
+                {renderFlagToggles()}
+              </div>
+              {!selectedAirTemperatureColumnId || !selectedAirSpeedColumnId
+                ? <p className="py-6 text-center text-xs text-ink-400">Select temperature and speed.</p>
+                : <AirDensityPanel data={airDensityData} isLoading={isLoadingAirDensity} error={airDensityError} />}
             </div>
-          </section>
+          )}
 
-          {activeTab === "wind-rose" ? (
-            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <section className="panel-surface p-5">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
-                  <div className="mt-4 space-y-4">
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Direction channel
-                      <select value={selectedDirectionColumnId} onChange={(event) => setSelectedDirectionColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={directionColumns.length === 0}>
-                        <option value="">Select a direction column</option>
-                        {directionColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Value channel
-                      <select value={selectedValueColumnId} onChange={(event) => setSelectedValueColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={valueColumns.length === 0}>
-                        <option value="">Select a value column</option>
-                        {valueColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Number of sectors
-                      <select value={numSectors} onChange={(event) => setNumSectors(Number(event.target.value) as 12 | 16 | 36)} className="rounded-2xl border-ink-200 bg-white">
-                        <option value={12}>12 sectors</option>
-                        <option value={16}>16 sectors</option>
-                        <option value={36}>36 sectors</option>
-                      </select>
-                    </label>
-                  </div>
-                </section>
-
-                <section className="panel-surface p-5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
-                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
-                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
-                  {!isLoadingFlags && flags.length > 0 ? (
-                    <div className="mt-4 space-y-3">
-                      {flags.map((flag) => {
-                        const excluded = excludedFlagIds.includes(flag.id);
-                        return (
-                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
-                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
-                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
-                            <span className="flex-1 text-sm text-ink-700">
-                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
-                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-              </aside>
-
-              <div className="space-y-4">
-                {!selectedDirectionColumnId || !selectedValueColumnId ? (
-                  <section className="panel-surface p-8 text-sm text-ink-600">Select both a direction channel and a value channel to build the wind rose.</section>
-                ) : (
-                  <WindRoseChart data={roseData} isLoading={isLoadingWindRose} error={windRoseError} />
-                )}
+          {/* ===== Extreme Wind ===== */}
+          {activeTab === "extreme-wind" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={selectedExtremeSpeedColumnId} onChange={(e) => setSelectedExtremeSpeedColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Speed</option>
+                  {turbulenceSpeedColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={selectedExtremeGustColumnId} onChange={(e) => setSelectedExtremeGustColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Gust</option>
+                  {gustColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {renderFlagToggles()}
               </div>
-            </section>
-          ) : activeTab === "histogram" ? (
-            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <section className="panel-surface p-5">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
-                  <div className="mt-4 space-y-4">
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Histogram column
-                      <select value={selectedHistogramColumnId} onChange={(event) => setSelectedHistogramColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={histogramColumns.length === 0}>
-                        <option value="">Select a column</option>
-                        {histogramColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+              {!selectedExtremeSpeedColumnId
+                ? <p className="py-6 text-center text-xs text-ink-400">Select a speed column.</p>
+                : <ExtremeWindPanel data={extremeWindData} isLoading={isLoadingExtremeWind} error={extremeWindError} />}
+            </div>
+          )}
 
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Number of bins
-                      <input
-                        type="number"
-                        min={1}
-                        max={200}
-                        value={histogramBins}
-                        onChange={(event) => setHistogramBins(Math.max(1, Math.min(200, Number(event.target.value) || 1)))}
-                        className="rounded-2xl border-ink-200 bg-white"
-                      />
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Bin width override
-                      <input
-                        type="number"
-                        min={0}
-                        step="any"
-                        value={histogramBinWidth}
-                        onChange={(event) => setHistogramBinWidth(event.target.value)}
-                        placeholder="Auto"
-                        className="rounded-2xl border-ink-200 bg-white"
-                      />
-                    </label>
-                  </div>
-                </section>
-
-                <section className="panel-surface p-5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
-                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
-                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
-                  {!isLoadingFlags && flags.length > 0 ? (
-                    <div className="mt-4 space-y-3">
-                      {flags.map((flag) => {
-                        const excluded = excludedFlagIds.includes(flag.id);
-                        return (
-                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
-                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
-                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
-                            <span className="flex-1 text-sm text-ink-700">
-                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
-                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-              </aside>
-
-              <div className="space-y-4">
-                {!selectedHistogramColumnId ? (
-                  <section className="panel-surface p-8 text-sm text-ink-600">Select a data column to build the histogram.</section>
-                ) : (
-                  <FrequencyHistogram
-                    data={histogramData}
-                    isLoading={isLoadingHistogram}
-                    error={histogramError}
-                    columnLabel={histogramColumnLabel}
-                    isWeibullAvailable={isWeibullAvailable}
-                    showWeibullFit={showWeibullFit}
-                    onToggleWeibullFit={setShowWeibullFit}
-                    weibullMethod={weibullMethod}
-                    onChangeWeibullMethod={setWeibullMethod}
-                    weibullData={weibullData}
-                    isLoadingWeibull={isLoadingWeibull}
-                    weibullError={weibullError}
-                  />
-                )}
+          {/* ===== Scatter ===== */}
+          {activeTab === "scatter" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={selectedScatterXColumnId} onChange={(e) => setSelectedScatterXColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">X axis</option>
+                  {datasetDetail.columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={selectedScatterYColumnId} onChange={(e) => setSelectedScatterYColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Y axis</option>
+                  {datasetDetail.columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select value={selectedScatterColorColumnId} onChange={(e) => setSelectedScatterColorColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Color</option>
+                  {datasetDetail.columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {renderFlagToggles()}
               </div>
-            </section>
-          ) : activeTab === "shear" ? (
-            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <section className="panel-surface p-5">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
-                  <div className="mt-4 space-y-4">
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Direction column
-                      <select value={selectedShearDirectionColumnId} onChange={(event) => setSelectedShearDirectionColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={directionColumns.length === 0}>
-                        <option value="">No direction grouping</option>
-                        {directionColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="rounded-2xl border border-ink-100 bg-white/80 px-4 py-4 text-sm text-ink-700">
-                      <div className="font-semibold text-ink-900">Measured speed heights</div>
-                      <div className="mt-3 space-y-2">
-                        {shearSpeedColumns.map((column) => (
-                          <div key={column.id} className="flex items-center justify-between gap-3">
-                            <span>{column.name}</span>
-                            <span className="rounded-full bg-ink-900/5 px-2 py-1 text-xs font-medium uppercase tracking-[0.14em] text-ink-600">{column.height_m}m</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="panel-surface p-5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
-                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
-                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
-                  {!isLoadingFlags && flags.length > 0 ? (
-                    <div className="mt-4 space-y-3">
-                      {flags.map((flag) => {
-                        const excluded = excludedFlagIds.includes(flag.id);
-                        return (
-                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
-                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
-                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
-                            <span className="flex-1 text-sm text-ink-700">
-                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
-                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-              </aside>
-
-              <div className="space-y-4">
-                {shearSpeedColumns.length < 2 ? (
-                  <section className="panel-surface p-8 text-sm text-ink-600">At least two wind speed columns with distinct heights are required to calculate shear.</section>
-                ) : (
-                  <WindShearPanel
-                    data={shearData}
-                    isLoading={isLoadingShear}
-                    error={shearError}
-                    method={shearMethod}
-                    targetHeight={shearTargetHeight}
-                    onTargetHeightChange={setShearTargetHeight}
-                    onMethodChange={setShearMethod}
-                    onCreateChannel={handleCreateExtrapolatedChannel}
-                    isCreatingChannel={isCreatingExtrapolatedChannel}
-                    createChannelError={createChannelError}
-                    createdChannelName={createdChannelName}
-                  />
-                )}
-              </div>
-            </section>
-          ) : activeTab === "turbulence" ? (
-            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <section className="panel-surface p-5">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
-                  <div className="mt-4 space-y-4">
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Speed column
-                      <select value={selectedTurbulenceSpeedColumnId} onChange={(event) => setSelectedTurbulenceSpeedColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={turbulenceSpeedColumns.length === 0}>
-                        <option value="">Select a speed column</option>
-                        {turbulenceSpeedColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Speed SD / TI column
-                      <select value={selectedTurbulenceSdColumnId} onChange={(event) => setSelectedTurbulenceSdColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={turbulenceSdColumns.length === 0}>
-                        <option value="">Select a TI input column</option>
-                        {turbulenceSdColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Direction column
-                      <select value={selectedTurbulenceDirectionColumnId} onChange={(event) => setSelectedTurbulenceDirectionColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={directionColumns.length === 0}>
-                        <option value="">No direction grouping</option>
-                        {directionColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      TI speed-bin width (m/s)
-                      <input type="number" min="0.1" step="0.1" value={turbulenceBinWidth} onChange={(event) => setTurbulenceBinWidth(event.target.value)} className="rounded-2xl border-ink-200 bg-white" />
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Direction sectors
-                      <select value={numSectors} onChange={(event) => setNumSectors(Number(event.target.value) as 12 | 16 | 36)} className="rounded-2xl border-ink-200 bg-white">
-                        <option value={12}>12 sectors</option>
-                        <option value={16}>16 sectors</option>
-                        <option value={36}>36 sectors</option>
-                      </select>
-                    </label>
-                  </div>
-                </section>
-
-                <section className="panel-surface p-5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
-                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
-                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
-                  {!isLoadingFlags && flags.length > 0 ? (
-                    <div className="mt-4 space-y-3">
-                      {flags.map((flag) => {
-                        const excluded = excludedFlagIds.includes(flag.id);
-                        return (
-                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
-                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
-                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
-                            <span className="flex-1 text-sm text-ink-700">
-                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
-                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-              </aside>
-
-              <div className="space-y-4">
-                {!selectedTurbulenceSpeedColumnId || !selectedTurbulenceSdColumnId ? (
-                  <section className="panel-surface p-8 text-sm text-ink-600">Select a wind speed column and a speed standard deviation column to run turbulence intensity analysis.</section>
-                ) : (
-                  <TurbulencePanel data={turbulenceData} isLoading={isLoadingTurbulence} error={turbulenceError} />
-                )}
-              </div>
-            </section>
-          ) : activeTab === "air-density" ? (
-            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <section className="panel-surface p-5">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
-                  <div className="mt-4 space-y-4">
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Temperature column
-                      <select value={selectedAirTemperatureColumnId} onChange={(event) => setSelectedAirTemperatureColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={temperatureColumns.length === 0}>
-                        <option value="">Select a temperature column</option>
-                        {temperatureColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Wind-speed column
-                      <select value={selectedAirSpeedColumnId} onChange={(event) => setSelectedAirSpeedColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={turbulenceSpeedColumns.length === 0}>
-                        <option value="">Select a speed column</option>
-                        {turbulenceSpeedColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Pressure source
-                      <select value={airPressureSource} onChange={(event) => setAirPressureSource(event.target.value as AirDensityPressureSource)} className="rounded-2xl border-ink-200 bg-white">
-                        <option value="auto">Auto</option>
-                        <option value="measured">Measured pressure</option>
-                        <option value="estimated">Estimate from elevation</option>
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Pressure column
-                      <select value={selectedAirPressureColumnId} onChange={(event) => setSelectedAirPressureColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={pressureColumns.length === 0 || airPressureSource === "estimated"}>
-                        <option value="">No pressure column</option>
-                        {pressureColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Elevation (m)
-                      <input type="number" step="1" value={airElevation} onChange={(event) => setAirElevation(event.target.value)} placeholder={activeProject?.elevation != null ? String(activeProject.elevation) : "Project elevation"} className="rounded-2xl border-ink-200 bg-white" />
-                    </label>
-                  </div>
-                </section>
-
-                <section className="panel-surface p-5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
-                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
-                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
-                  {!isLoadingFlags && flags.length > 0 ? (
-                    <div className="mt-4 space-y-3">
-                      {flags.map((flag) => {
-                        const excluded = excludedFlagIds.includes(flag.id);
-                        return (
-                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
-                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
-                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
-                            <span className="flex-1 text-sm text-ink-700">
-                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
-                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-              </aside>
-
-              <div className="space-y-4">
-                {!selectedAirTemperatureColumnId || !selectedAirSpeedColumnId ? (
-                  <section className="panel-surface p-8 text-sm text-ink-600">Select temperature and wind-speed inputs to calculate air density and wind power density.</section>
-                ) : (
-                  <AirDensityPanel data={airDensityData} isLoading={isLoadingAirDensity} error={airDensityError} />
-                )}
-              </div>
-            </section>
-          ) : activeTab === "extreme-wind" ? (
-            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <section className="panel-surface p-5">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
-                  <div className="mt-4 space-y-4">
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Mean speed column
-                      <select value={selectedExtremeSpeedColumnId} onChange={(event) => setSelectedExtremeSpeedColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={turbulenceSpeedColumns.length === 0}>
-                        <option value="">Select a speed column</option>
-                        {turbulenceSpeedColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Gust column
-                      <select value={selectedExtremeGustColumnId} onChange={(event) => setSelectedExtremeGustColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={gustColumns.length === 0}>
-                        <option value="">No gust column</option>
-                        {gustColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                </section>
-
-                <section className="panel-surface p-5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
-                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
-                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
-                  {!isLoadingFlags && flags.length > 0 ? (
-                    <div className="mt-4 space-y-3">
-                      {flags.map((flag) => {
-                        const excluded = excludedFlagIds.includes(flag.id);
-                        return (
-                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
-                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
-                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
-                            <span className="flex-1 text-sm text-ink-700">
-                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
-                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-              </aside>
-
-              <div className="space-y-4">
-                {!selectedExtremeSpeedColumnId ? (
-                  <section className="panel-surface p-8 text-sm text-ink-600">Select a mean wind-speed column to estimate annual maxima and return-period extremes.</section>
-                ) : (
-                  <ExtremeWindPanel data={extremeWindData} isLoading={isLoadingExtremeWind} error={extremeWindError} />
-                )}
-              </div>
-            </section>
-          ) : activeTab === "scatter" ? (
-            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <section className="panel-surface p-5">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
-                  <div className="mt-4 space-y-4">
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      X axis
-                      <select value={selectedScatterXColumnId} onChange={(event) => setSelectedScatterXColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={datasetDetail.columns.length === 0}>
-                        <option value="">Select a column</option>
-                        {datasetDetail.columns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Y axis
-                      <select value={selectedScatterYColumnId} onChange={(event) => setSelectedScatterYColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={datasetDetail.columns.length === 0}>
-                        <option value="">Select a column</option>
-                        {datasetDetail.columns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Color by
-                      <select value={selectedScatterColorColumnId} onChange={(event) => setSelectedScatterColorColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white">
-                        <option value="">No color channel</option>
-                        {datasetDetail.columns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                </section>
-
-                <section className="panel-surface p-5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
-                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
-                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
-                  {!isLoadingFlags && flags.length > 0 ? (
-                    <div className="mt-4 space-y-3">
-                      {flags.map((flag) => {
-                        const excluded = excludedFlagIds.includes(flag.id);
-                        return (
-                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
-                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
-                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
-                            <span className="flex-1 text-sm text-ink-700">
-                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
-                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-              </aside>
-
-              <div className="space-y-4">
-                {!selectedScatterXColumnId || !selectedScatterYColumnId ? (
-                  <section className="panel-surface p-8 text-sm text-ink-600">Select two columns to compare their paired values across the clean dataset.</section>
-                ) : (
-                  <Suspense
-                    fallback={
-                      <section className="panel-surface p-8">
-                        <LoadingSpinner label="Loading scatter workspace" />
-                      </section>
-                    }
-                  >
-                    <ScatterPlot
-                      data={scatterData}
-                      isLoading={isLoadingScatter}
-                      error={scatterError}
-                      xColumn={selectedScatterXColumn}
-                      yColumn={selectedScatterYColumn}
-                      colorColumn={selectedScatterColorColumn}
-                    />
+              {!selectedScatterXColumnId || !selectedScatterYColumnId
+                ? <p className="py-6 text-center text-xs text-ink-400">Select X and Y columns.</p>
+                : <Suspense fallback={<LoadingSpinner label="Loading scatter" />}>
+                    <ScatterPlot data={scatterData} isLoading={isLoadingScatter} error={scatterError} xColumn={selectedScatterXColumn} yColumn={selectedScatterYColumn} colorColumn={selectedScatterColorColumn} />
                   </Suspense>
-                )}
+              }
+            </div>
+          )}
+
+          {/* ===== Profiles ===== */}
+          {activeTab === "profiles" && (
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={selectedProfileColumnId} onChange={(e) => setSelectedProfileColumnId(e.target.value)} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+                  <option value="">Column</option>
+                  {valueColumns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {renderFlagToggles()}
               </div>
-            </section>
-          ) : activeTab === "profiles" ? (
-            <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-              <aside className="space-y-4">
-                <section className="panel-surface p-5">
-                  <p className="font-mono text-[11px] uppercase tracking-[0.28em] text-teal-500">Inputs</p>
-                  <div className="mt-4 space-y-4">
-                    <label className="grid gap-2 text-sm font-medium text-ink-800">
-                      Profile column
-                      <select value={selectedProfileColumnId} onChange={(event) => setSelectedProfileColumnId(event.target.value)} className="rounded-2xl border-ink-200 bg-white" disabled={valueColumns.length === 0}>
-                        <option value="">Select a column</option>
-                        {valueColumns.map((column) => (
-                          <option key={column.id} value={column.id}>
-                            {column.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <div className="rounded-2xl border border-ink-100 bg-white/80 px-4 py-4 text-sm text-ink-700">
-                      <div className="font-semibold text-ink-900">Profile outputs</div>
-                      <div className="mt-3 space-y-2 text-ink-600">
-                        <div>Diurnal mean with standard-deviation shading</div>
-                        <div>Monthly mean bars with error bars</div>
-                        <div>Monthly-diurnal heatmap and yearly overlays when multiple years are available</div>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-
-                <section className="panel-surface p-5">
-                  <div className="flex items-center gap-2 text-sm font-medium text-ink-800"><Wind className="h-4 w-4 text-teal-500" />QC exclusions</div>
-                  {isLoadingFlags ? <div className="mt-4 text-sm text-ink-600">Loading flags...</div> : null}
-                  {!isLoadingFlags && flags.length === 0 ? <div className="mt-4 text-sm leading-7 text-ink-600">No flags are configured for this dataset yet.</div> : null}
-                  {!isLoadingFlags && flags.length > 0 ? (
-                    <div className="mt-4 space-y-3">
-                      {flags.map((flag) => {
-                        const excluded = excludedFlagIds.includes(flag.id);
-                        return (
-                          <label key={flag.id} className="flex items-start gap-3 rounded-2xl border border-ink-100 px-3 py-3 transition hover:bg-ink-50/80">
-                            <input type="checkbox" checked={excluded} onChange={() => toggleExcludedFlag(flag.id)} className="mt-1 rounded border-ink-300 text-teal-500 focus:ring-teal-500" />
-                            <span className="mt-1 h-3 w-3 rounded-full" style={{ backgroundColor: flag.color ?? "#94a3b8" }} />
-                            <span className="flex-1 text-sm text-ink-700">
-                              <span className="font-medium text-ink-900">Exclude {flag.name}</span>
-                              <span className="mt-1 block text-xs leading-6 text-ink-500">{flag.flagged_count} flagged ranges</span>
-                            </span>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-                </section>
-              </aside>
-
-              <div className="space-y-4">
-                {!selectedProfileColumnId ? (
-                  <section className="panel-surface p-8 text-sm text-ink-600">Select a column to inspect its diurnal, monthly, and seasonal-hourly profile.</section>
-                ) : (
-                  <ProfilePlots data={profileData} isLoading={isLoadingProfiles} error={profileError} columnLabel={profileColumnLabel} />
-                )}
-              </div>
-            </section>
-          ) : (
-            <PlaceholderPanel title={analysisTabs.find((tab) => tab.id === activeTab)?.label ?? "Analysis"} description={analysisTabs.find((tab) => tab.id === activeTab)?.description ?? "This analysis module will be added in a later task."} />
+              {!selectedProfileColumnId
+                ? <p className="py-6 text-center text-xs text-ink-400">Select a column.</p>
+                : <ProfilePlots data={profileData} isLoading={isLoadingProfiles} error={profileError} columnLabel={profileColumnLabel} />}
+            </div>
           )}
         </>
       ) : null}
+    </div>
+  );
+}
+
+/* ---------- AI helper buttons (hidden when AI disabled) ---------- */
+
+function AiAnalysisButtons({ projectId, activeTab }: { projectId: string; activeTab: string }) {
+  const { enabled, sendPrompt } = useAi();
+  if (!enabled || !projectId) return null;
+
+  return (
+    <span className="ml-auto flex items-center gap-1">
+      <button
+        type="button"
+        onClick={() => void sendPrompt(projectId, `Interpret the ${activeTab.replace("-", " ")} results for this dataset and highlight anything notable.`)}
+        className="inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700 transition hover:bg-teal-100 dark:bg-teal-900/20 dark:text-teal-400"
+      >
+        <Bot className="h-3 w-3" /> Interpret
+      </button>
+      <button
+        type="button"
+        onClick={() => void sendPrompt(projectId, "Based on the analyses already completed for this project, suggest what analysis I should run next and why.")}
+        className="inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2 py-1 text-[11px] font-medium text-teal-700 transition hover:bg-teal-100 dark:bg-teal-900/20 dark:text-teal-400"
+      >
+        <Bot className="h-3 w-3" /> Suggest Next
+      </button>
+    </span>
+  );
+}
+
+/* ---------- Contextual insight banners from AI health issues ---------- */
+
+function AnalysisInsightBanners({ projectId }: { projectId: string }) {
+  const { enabled, insights, dismissInsight, sendPrompt } = useAi();
+  if (!enabled || !projectId) return null;
+
+  const analysisInsights = insights.filter(
+    (i) => i.category === "analysis" || i.category === "data_quality" || i.category === "analysis_gap",
+  );
+  if (analysisInsights.length === 0) return null;
+
+  return (
+    <div className="space-y-2">
+      {analysisInsights.map((insight) => (
+        <InsightBanner
+          key={insight.id}
+          message={insight.message}
+          severity={insight.severity}
+          actionLabel={insight.actionLabel}
+          onAction={insight.actionPrompt ? () => void sendPrompt(projectId, insight.actionPrompt!) : undefined}
+          onDismiss={() => dismissInsight(insight.id)}
+        />
+      ))}
     </div>
   );
 }

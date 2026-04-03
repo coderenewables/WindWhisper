@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 import uuid
 from calendar import month_abbr
@@ -90,8 +91,36 @@ from app.services.turbulence import build_scatter_points, calculate_ti, iec_refe
 from app.services.weibull import fit_weibull, weibull_pdf
 from app.services.wind_shear import extrapolate_to_height, shear_profile
 
+_logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/analysis", tags=["analysis"])
+
+
+async def _track_provenance(
+    db: AsyncSession,
+    dataset_id: uuid.UUID,
+    analysis_type: str,
+    parameters: dict[str, Any],
+    results: dict[str, Any],
+    column_ids: list[uuid.UUID] | None = None,
+    excluded_flag_ids: list[uuid.UUID] | None = None,
+    data_frame: pd.DataFrame | None = None,
+) -> None:
+    """Store an AnalysisResult + provenance record as a non-blocking side effect."""
+    try:
+        from app.ai.provenance import store_result_with_provenance
+        await store_result_with_provenance(
+            db,
+            dataset_id=dataset_id,
+            analysis_type=analysis_type,
+            parameters=parameters,
+            results=results,
+            column_ids=column_ids,
+            excluded_flag_ids=excluded_flag_ids,
+            data_frame=data_frame,
+        )
+    except Exception:
+        _logger.debug("Provenance tracking failed for %s on dataset %s", analysis_type, dataset_id, exc_info=True)
 
 
 def _format_speed_bin_label(lower: float, upper: float | None) -> str:
@@ -707,6 +736,15 @@ async def create_weibull_fit(
     pdf_values = weibull_pdf(x_values, float(fit["k"]), float(fit["A"]))
     representative_width = float(np.mean(np.diff(edges))) if len(edges) > 1 else 1.0
 
+    await _track_provenance(
+        db, dataset.id, "weibull",
+        parameters={"column_id": str(column.id), "method": payload.method},
+        results={"k": fit.get("k"), "A": fit.get("A"), "mean": fit.get("mean")},
+        column_ids=[column.id],
+        excluded_flag_ids=payload.exclude_flags,
+        data_frame=positive_series.to_frame(),
+    )
+
     return WeibullResponse(
         dataset_id=dataset.id,
         column_id=column.id,
@@ -760,6 +798,16 @@ async def create_shear_analysis(
         num_sectors=payload.num_sectors,
         target_height=payload.target_height,
     )
+
+    await _track_provenance(
+        db, dataset.id, "shear",
+        parameters={"method": payload.method, "target_height": payload.target_height, "num_sectors": payload.num_sectors},
+        results={"pairs": [{"h1": p.get("lower_height"), "h2": p.get("upper_height"), "alpha": p.get("alpha")} for p in profile.get("pairs", [])] if isinstance(profile, dict) else {}},
+        column_ids=column_ids,
+        excluded_flag_ids=payload.exclude_flags,
+        data_frame=filtered,
+    )
+
     return _serialize_shear_response(dataset.id, payload, profile)
 
 
@@ -819,6 +867,15 @@ async def create_turbulence_analysis(
     else:
         min_speed = 1.0
         max_speed = 25.0
+
+    await _track_provenance(
+        db, dataset.id, "turbulence",
+        parameters={"speed_column_id": str(speed_column.id), "sd_column_id": str(sd_column.id), "bin_width": payload.bin_width},
+        results=summary,
+        column_ids=column_ids,
+        excluded_flag_ids=payload.exclude_flags,
+        data_frame=frame,
+    )
 
     return TurbulenceResponse(
         dataset_id=dataset.id,
@@ -910,6 +967,15 @@ async def create_air_density_analysis(
     monthly_rows = monthly_averages(timestamps, density_values, wpd_values)
     density_points = build_density_points(timestamps, density_values, wpd_values, max_points=payload.max_series_points)
 
+    await _track_provenance(
+        db, dataset.id, "air_density",
+        parameters={"temperature_column_id": str(temperature_column.id), "speed_column_id": str(speed_column.id), "pressure_source": pressure_source},
+        results=summary,
+        column_ids=column_ids,
+        excluded_flag_ids=payload.exclude_flags,
+        data_frame=frame,
+    )
+
     return AirDensityResponse(
         dataset_id=dataset.id,
         temperature_column_id=temperature_column.id,
@@ -964,6 +1030,15 @@ async def create_extreme_wind_analysis(
         gust_series,
         return_periods=payload.return_periods,
         max_curve_points=payload.max_curve_points,
+    )
+
+    await _track_provenance(
+        db, dataset.id, "extreme_wind",
+        parameters={"speed_column_id": str(speed_column.id), "gust_column_id": str(gust_column.id) if gust_column else None},
+        results=summary.get("summary", {}),
+        column_ids=column_ids,
+        excluded_flag_ids=payload.exclude_flags,
+        data_frame=frame,
     )
 
     return ExtremeWindResponse(
@@ -1304,6 +1379,15 @@ async def create_energy_estimate(
     monthly_rows = energy_by_month(timestamps, power_values, time_step_hours=time_step_hours)
     speed_bin_rows = energy_by_speed_bin(speed_values, power_values, time_step_hours=time_step_hours, bin_width=payload.speed_bin_width)
     power_curve_summary = _serialize_power_curve_summary(summarize_power_curve(power_curve))
+
+    await _track_provenance(
+        db, dataset.id, "energy_estimate",
+        parameters={"speed_column_id": str(speed_column.id), "air_density_adjustment": payload.air_density_adjustment},
+        results=estimate.get("summary", {}),
+        column_ids=column_ids,
+        excluded_flag_ids=payload.exclude_flags,
+        data_frame=frame,
+    )
 
     return EnergyEstimateResponse(
         dataset_id=dataset.id,

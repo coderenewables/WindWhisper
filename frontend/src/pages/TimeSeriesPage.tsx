@@ -1,4 +1,4 @@
-import { AlertTriangle, Database, LineChart, Radar, Waves } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
@@ -201,112 +201,45 @@ export function TimeSeriesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <section className="panel-surface overflow-hidden px-6 py-8 sm:px-8">
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.5fr)_minmax(340px,0.9fr)] xl:items-end">
-          <div>
-            <h1 className="mt-3 max-w-3xl text-2xl font-semibold leading-tight text-ink-900 sm:text-3xl">
-              Time-series: interactive zoom, pan, and resampling.
-            </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-600">
-              Choose a project and dataset to inspect multiple channels with server-side resampling support.
-            </p>
-          </div>
-
-          <div className="panel-muted grid gap-3 p-3 sm:grid-cols-2 text-sm">
-            <label className="grid gap-1 text-xs font-medium text-ink-800">
-              Project
-              <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-2xl border-ink-200 bg-white">
-                <option value="">Select a project</option>
-                {projects.map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <label className="grid gap-1 text-xs font-medium text-ink-800">
-              Dataset
-              <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-2xl border-ink-200 bg-white" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
-                <option value="">Select a dataset</option>
-                {datasets.map((dataset) => (
-                  <option key={dataset.id} value={dataset.id}>
-                    {dataset.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </div>
-      </section>
-
-      {!projectId ? (
-        <section className="panel-surface p-8 text-sm text-ink-600">Choose a project to begin inspecting datasets.</section>
-      ) : null}
+    <div className="space-y-3">
+      {/* Compact toolbar row */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h1 className="text-sm font-semibold text-ink-900">Time Series</h1>
+        <select value={projectId} onChange={(event) => updateSearch({ projectId: event.target.value, datasetId: "" })} className="rounded-lg border-ink-200 bg-white py-1 text-xs">
+          <option value="">Project</option>
+          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <select value={datasetId} onChange={(event) => updateSearch({ datasetId: event.target.value })} className="rounded-lg border-ink-200 bg-white py-1 text-xs" disabled={!projectId || isLoadingDatasets || datasets.length === 0}>
+          <option value="">Dataset</option>
+          {datasets.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
+        </select>
+        {datasetDetail && (
+          <span className="ml-auto text-[11px] text-ink-400">
+            {datasetDetail.row_count.toLocaleString()} rows &middot; {datasetDetail.column_count} ch &middot; {renderedPointCount.toLocaleString()} pts
+          </span>
+        )}
+      </div>
 
       {datasetsError || datasetDetailError ? (
-        <section className="panel-surface flex items-start gap-3 border border-red-200 bg-red-50/80 p-4 text-sm text-red-700">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50/80 p-2 text-xs text-red-700">
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>{datasetsError || datasetDetailError}</span>
-        </section>
+        </div>
       ) : null}
 
-      {projectId && isLoadingDatasets ? (
-        <section className="panel-surface p-6">
-          <LoadingSpinner label="Loading datasets" />
-        </section>
-      ) : null}
+      {!projectId ? <p className="py-8 text-center text-xs text-ink-400">Select a project to begin.</p> : null}
+
+      {projectId && isLoadingDatasets ? <div className="py-8"><LoadingSpinner label="Loading datasets" /></div> : null}
 
       {projectId && !isLoadingDatasets && datasets.length === 0 ? (
-        <section className="panel-surface p-8">
-          <h2 className="text-2xl font-semibold text-ink-900">No datasets available</h2>
-          <p className="mt-3 max-w-2xl text-sm leading-7 text-ink-600">
-            This project does not have imported datasets yet. Start with the upload workflow, then come back here to inspect the channels.
-          </p>
-          <Link to={`/import?projectId=${projectId}`} className="mt-6 inline-flex items-center gap-2 rounded-2xl bg-ember-500 px-5 py-3 text-sm font-medium text-white transition hover:bg-ember-400">
-            Import dataset
-          </Link>
-        </section>
+        <div className="flex flex-col items-center py-8 text-center">
+          <p className="text-xs text-ink-500">No datasets yet.</p>
+          <Link to={`/import?projectId=${projectId}`} className="mt-3 inline-flex items-center gap-1.5 rounded-lg bg-ember-500 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-ember-400">Import</Link>
+        </div>
       ) : null}
 
       {datasetDetail ? (
         <>
-          <section className="grid gap-4 xl:grid-cols-4">
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700">
-                <Database className="h-4 w-4 text-teal-500" />
-                Dataset
-              </div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{datasetDetail.name}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">{activeProject?.name ?? "Active project"}</p>
-            </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700">
-                <LineChart className="h-4 w-4 text-teal-500" />
-                Rows
-              </div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{datasetDetail.row_count.toLocaleString()}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Stored measurements in the current dataset.</p>
-            </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700">
-                <Radar className="h-4 w-4 text-teal-500" />
-                Channels
-              </div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{datasetDetail.column_count}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Available sensor channels for plotting.</p>
-            </div>
-            <div className="panel-muted px-4 py-4">
-              <div className="flex items-center gap-2 text-sm font-medium text-ink-700">
-                <Waves className="h-4 w-4 text-teal-500" />
-                Returned points
-              </div>
-              <p className="mt-3 text-xl font-semibold text-ink-900">{renderedPointCount.toLocaleString()}</p>
-              <p className="mt-1 text-sm leading-7 text-ink-600">Points currently rendered after resampling.</p>
-            </div>
-          </section>
-
           <TimeSeriesControls
             resample={resample}
             appliedResample={data?.resample ?? null}
@@ -323,39 +256,36 @@ export function TimeSeriesPage() {
             onSetShowCleanDataOnly={(value) => setExcludedFlagIds(value ? flags.map((flag) => flag.id) : [])}
           />
 
-          <section className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-            <ChannelSelector
-              columns={datasetDetail.columns}
-              selectedColumnIds={selectedColumnIds}
-              colorByColumnId={colorByColumnId}
-              onToggle={(columnId) =>
-                setSelectedColumnIds((current) =>
-                  current.includes(columnId) ? current.filter((item) => item !== columnId) : [...current, columnId],
-                )
-              }
-              onSelectAll={() => setSelectedColumnIds(datasetDetail.columns.map((column) => column.id))}
-              onClearAll={() => setSelectedColumnIds([])}
-            />
+          {/* Full-width chart with collapsible channel selector */}
+          <TimeSeriesChart
+            datasetColumns={datasetDetail.columns}
+            selectedColumnIds={selectedColumnIds}
+            colorByColumnId={colorByColumnId}
+            data={data}
+            isLoading={isLoading || isLoadingDatasetDetail || isLoadingFlags}
+            error={error}
+            onRangeChange={setVisibleRange}
+            onFitAll={() => setVisibleRange({ start: datasetDetail.start_time, end: datasetDetail.end_time })}
+            flaggedRanges={visibleFlaggedRanges}
+            flagMetaById={flagMetaById}
+            excludedFlagIds={excludedFlagIds}
+          />
 
-            <TimeSeriesChart
-              datasetColumns={datasetDetail.columns}
-              selectedColumnIds={selectedColumnIds}
-              colorByColumnId={colorByColumnId}
-              data={data}
-              isLoading={isLoading || isLoadingDatasetDetail || isLoadingFlags}
-              error={error}
-              onRangeChange={setVisibleRange}
-              onFitAll={() => setVisibleRange({ start: datasetDetail.start_time, end: datasetDetail.end_time })}
-              flaggedRanges={visibleFlaggedRanges}
-              flagMetaById={flagMetaById}
-              excludedFlagIds={excludedFlagIds}
-            />
-          </section>
+          <ChannelSelector
+            columns={datasetDetail.columns}
+            selectedColumnIds={selectedColumnIds}
+            colorByColumnId={colorByColumnId}
+            onToggle={(columnId) =>
+              setSelectedColumnIds((current) =>
+                current.includes(columnId) ? current.filter((item) => item !== columnId) : [...current, columnId],
+              )
+            }
+            onSelectAll={() => setSelectedColumnIds(datasetDetail.columns.map((column) => column.id))}
+            onClearAll={() => setSelectedColumnIds([])}
+          />
         </>
       ) : datasetId && isLoadingDatasetDetail ? (
-        <section className="panel-surface p-6">
-          <LoadingSpinner label="Loading dataset detail" />
-        </section>
+        <div className="py-8"><LoadingSpinner label="Loading dataset" /></div>
       ) : null}
     </div>
   );

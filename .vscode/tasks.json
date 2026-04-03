@@ -176,6 +176,17 @@
 				"build"
 			],
 			"isBackground": false
+		},
+		{
+			"label": "frontend-build-verify",
+			"type": "shell",
+			"command": "C:\\Users\\NathishSeenivasagam\\node-v24.13.1-win-x64\\npm.cmd",
+			"args": [
+				"--prefix",
+				"frontend",
+				"run",
+				"build"
+			]
 		}
 	]
 }
