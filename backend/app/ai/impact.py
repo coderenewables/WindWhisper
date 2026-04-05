@@ -338,7 +338,11 @@ async def _estimate_generic_impact(
 
     from app.services.qc_engine import get_clean_dataframe
 
-    dataset_id = UUID(dataset_id_str)
+    try:
+        dataset_id = UUID(str(dataset_id_str))
+    except (ValueError, TypeError, AttributeError):
+        return _empty_impact("Invalid dataset_id in action payload.")
+
     df = await get_clean_dataframe(db, dataset_id)
     if df is None or df.empty:
         return _empty_impact("No data available.")

@@ -53,7 +53,9 @@ class LLMClient:
             except Exception as exc:
                 if attempt == self.max_retries:
                     raise
-                wait = 2 ** (attempt - 1)
+                # Use longer backoff for rate-limit (429) errors.
+                is_rate_limit = "RateLimitError" in type(exc).__name__ or "429" in str(exc)
+                wait = (2 ** attempt * 5) if is_rate_limit else 2 ** (attempt - 1)
                 logger.warning("LLM request failed (attempt %d/%d): %s – retrying in %ds", attempt, self.max_retries, exc, wait)
                 await asyncio.sleep(wait)
         raise RuntimeError("Unreachable")

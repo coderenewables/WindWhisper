@@ -153,7 +153,16 @@ async def send_message(conversation_id: UUID, body: AiMessageCreateRequest, db: 
 
     from app.ai.orchestrator import run_conversation_turn
     llm = _get_llm_client()
-    reply_content, pending_actions = await run_conversation_turn(db, llm, conv.project_id, conv, body.content)
+    try:
+        reply_content, pending_actions = await run_conversation_turn(db, llm, conv.project_id, conv, body.content)
+    except Exception as exc:
+        exc_str = str(exc)
+        if "RateLimitError" in type(exc).__name__ or "429" in exc_str:
+            raise HTTPException(status_code=429, detail="The AI model is temporarily rate-limited. Please wait a moment and try again.")
+        if "NotFoundError" in type(exc).__name__ or "No endpoints found" in exc_str:
+            raise HTTPException(status_code=502, detail="The configured AI model is unavailable or does not support the required features. Please try a different model.")
+        logger.exception("AI conversation turn failed")
+        raise HTTPException(status_code=502, detail="AI request failed. Please try again later.")
 
     # Auto-title after first exchange
     if not conv.title and len(conv.messages) >= 2:

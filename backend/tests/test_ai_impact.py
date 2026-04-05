@@ -53,6 +53,22 @@ async def test_estimate_impact_unknown_type(db_session, project, dataset):
 
 
 @pytest.mark.asyncio
+async def test_estimate_impact_unknown_type_with_invalid_dataset_id(db_session, project):
+    from app.ai.impact import estimate_impact
+    action = AiAction(
+        project_id=project.id, action_type="unknown_type",
+        title="Unknown", payload={"dataset_id": "demo-dataset-1"}, status="pending",
+    )
+    db_session.add(action)
+    await db_session.flush()
+
+    result = await estimate_impact(db_session, project.id, action)
+    assert isinstance(result, dict)
+    assert result.get("confidence") == "low"
+    assert "error" in result
+
+
+@pytest.mark.asyncio
 async def test_estimate_impact_qc_flag_with_rules(db_session, project, dataset):
     from app.ai.impact import estimate_impact
     action = AiAction(
